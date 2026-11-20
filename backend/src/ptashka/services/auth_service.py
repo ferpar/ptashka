@@ -79,10 +79,7 @@ def refresh_access_token(db: Session, refresh_token: str) -> str:
     stored = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(refresh_token)))
     if stored is None or stored.revoked:
         raise InvalidRefreshTokenError("Invalid refresh token")
-    expires_at = stored.expires_at
-    if expires_at.tzinfo is None:  # SQLite drops tz info
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
+    if stored.expires_at < datetime.now(timezone.utc):  # UTCDateTime: always aware, even on SQLite.
         raise InvalidRefreshTokenError("Refresh token expired")
     if stored.user.status != UserStatus.ACTIVE:
         raise InvalidRefreshTokenError("User is not active")

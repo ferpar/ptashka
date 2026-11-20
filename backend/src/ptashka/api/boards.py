@@ -6,15 +6,17 @@ from sqlalchemy.orm import Session
 from ptashka.auth.board_access import BoardAccess, board_access
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import get_db
-from ptashka.models.db import Board, BoardMember, BoardRole, User
+from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
 from ptashka.models.schemas import (
     BoardCreateRequest,
     BoardDetail,
     BoardListResponse,
     BoardSummary,
     BoardUpdateRequest,
+    CardSchema,
     ListCreateRequest,
     ListSchema,
+    ListWithCards,
     MemberAddRequest,
     MemberListResponse,
     MemberSchema,
@@ -36,13 +38,24 @@ def _summary(board: Board, role: BoardRole) -> BoardSummary:
     )
 
 
-def _detail(access: BoardAccess, include_archived: bool) -> BoardDetail:
-    board = access.board
-    lists = [lst for lst in board.lists if include_archived or lst.archived_at is None]
+def _detail(db: Session, access: BoardAccess, include_archived: bool) -> BoardDetail:
+    board = board_service.load_board_tree(db, access.board.id)
+
+    def visible(item: BoardList | Card) -> bool:
+        return include_archived or item.archived_at is None
+
+    lists = [
+        ListWithCards(
+            **ListSchema.model_validate(lst).model_dump(),
+            cards=[CardSchema.model_validate(c) for c in lst.cards if visible(c)],
+        )
+        for lst in board.lists
+        if visible(lst)
+    ]
     members = sorted(board.members, key=lambda m: m.added_at)
     return BoardDetail(
         **_summary(board, access.role).model_dump(),
-        lists=[ListSchema.model_validate(lst) for lst in lists],
+        lists=lists,
         members=[MemberSchema.model_validate(m) for m in members],
     )
 
@@ -67,16 +80,17 @@ def create_board(
 ) -> BoardDetail:
     """Create a board. You become its owner."""
     board = board_service.create_board(db, user, request.name, request.description, request.default_lists)
-    return _detail(BoardAccess(board=board, role=BoardRole.OWNER, user=user), include_archived=False)
+    return _detail(db, BoardAccess(board=board, role=BoardRole.OWNER, user=user), include_archived=False)
 
 
 @router.get("/{board_id}", response_model=BoardDetail)
 def get_board(
     include_archived: bool = False,
     access: BoardAccess = Depends(board_access(BoardRole.VIEWER)),
+    db: Session = Depends(get_db),
 ) -> BoardDetail:
-    """The board with its lists and members. Archived lists are left out unless asked for."""
-    return _detail(access, include_archived)
+    """The board with its lists, cards and members. Archived lists and cards are left out unless asked for."""
+    return _detail(db, access, include_archived)
 
 
 @router.patch("/{board_id}", response_model=BoardDetail)
@@ -97,8 +111,7 @@ def update_board(
     if "description" in changes:  # null is allowed here: it clears the description.
         access.board.description = changes["description"]
     db.commit()
-    db.refresh(access.board)
-    return _detail(access, include_archived=False)
+    return _detail(db, access, include_archived=False)
 
 
 @router.delete("/{board_id}", status_code=status.HTTP_204_NO_CONTENT)

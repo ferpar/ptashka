@@ -7,7 +7,7 @@ publishes them in the OpenAPI schema at /openapi.json.
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, EmailStr, Field
 
 from ptashka.models.db import BoardRole, UserRole, UserStatus
 
@@ -152,10 +152,31 @@ class MemberSchema(BaseModel):
     added_at: datetime
 
 
-class BoardDetail(BoardSummary):
-    """Everything needed to render a board in one request (cards are added in phase 3)."""
+class CardSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    lists: list[ListSchema]
+    id: int
+    board_id: int
+    list_id: int
+    title: str
+    description: str | None
+    position: float
+    due_at: datetime | None
+    completed_at: datetime | None
+    archived_at: datetime | None
+    created_by_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ListWithCards(ListSchema):
+    cards: list[CardSchema]
+
+
+class BoardDetail(BoardSummary):
+    """Everything needed to render a board in one request."""
+
+    lists: list[ListWithCards]
     members: list[MemberSchema]
 
 
@@ -188,3 +209,27 @@ class MoveRequest(BaseModel):
     """
 
     after_id: int | None
+
+
+# ── Cards ──
+
+
+class CardCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=20000)
+    # AwareDatetime rejects "2026-12-01T10:00" (no timezone): a naive time is ambiguous for a deadline.
+    due_at: AwareDatetime | None = None
+
+
+class CardUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=20000)  # null clears
+    due_at: AwareDatetime | None = None  # null clears
+    completed: bool | None = None
+    archived: bool | None = None
+
+
+class CardMoveRequest(MoveRequest):
+    """Move a card to `list_id` (the same list to reorder), right after card `after_id` (null = top)."""
+
+    list_id: int

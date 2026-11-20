@@ -10,8 +10,22 @@ Each midpoint halves the gap, so after ~50 moves into the same spot a float
 runs out of precision. When the gap gets too small we renumber the siblings
 once (`spread`) and try again.
 
-These functions are pure (numbers in, numbers out), so they're trivial to test.
+`position_at` and `spread` are pure (numbers in, numbers out), so they're trivial
+to test. `place` applies them to anything with a `position` attribute.
 """
+
+from collections.abc import Sequence
+from typing import Protocol
+
+
+class Positioned(Protocol):
+    """Anything with a float `position`: BoardList and Card both qualify, without inheriting from this.
+
+    That's structural typing — the type checker accepts any object with the right shape.
+    """
+
+    position: float
+
 
 GAP = 1024.0
 MIN_GAP = 1e-6
@@ -41,3 +55,24 @@ def position_at(positions: list[float], index: int) -> float | None:
 def spread(count: int) -> list[float]:
     """Evenly spaced positions for `count` items: GAP, 2*GAP, ..."""
     return [GAP * (i + 1) for i in range(count)]
+
+
+def place(siblings: Sequence[Positioned], index: int) -> float:
+    """A position at `index` among `siblings` (sorted, not including the item being placed).
+
+    If there's no room, the siblings are renumbered in place first (the caller commits).
+    """
+    position = position_at([s.position for s in siblings], index)
+    if position is None:
+        for sibling, new_position in zip(siblings, spread(len(siblings))):
+            sibling.position = new_position
+        position = position_at([s.position for s in siblings], index)
+        assert position is not None  # A freshly spread sequence always has room.
+    return position
+
+
+def index_after(sibling_ids: list[int], after_id: int | None) -> int:
+    """Where "right after `after_id`" lands (None = first). Raises ValueError for an unknown id."""
+    if after_id is None:
+        return 0
+    return sibling_ids.index(after_id) + 1

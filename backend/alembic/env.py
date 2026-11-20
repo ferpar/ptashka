@@ -7,7 +7,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from ptashka.db.database import normalize_database_url
-from ptashka.models.db import Base
+from ptashka.models.db import Base, UTCDateTime
 
 config = context.config
 
@@ -22,12 +22,21 @@ if database_url:
     config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
 
 
+def render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+    """Write UTCDateTime as a plain sa.DateTime in migrations: the database only sees the
+    underlying type, and migrations shouldn't import app code that may change later."""
+    if type_ == "type" and isinstance(obj, UTCDateTime):
+        return "sa.DateTime(timezone=True)"
+    return False  # Default rendering for everything else.
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -44,6 +53,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             render_as_batch=connection.dialect.name == "sqlite",
+            render_item=render_item,
         )
         with context.begin_transaction():
             context.run_migrations()

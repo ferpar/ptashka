@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import get_db
-from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, User
+from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
 
 
 @dataclass
@@ -36,6 +36,12 @@ class BoardAccess:
 @dataclass
 class ListAccess:
     board_list: BoardList
+    access: BoardAccess
+
+
+@dataclass
+class CardAccess:
+    card: Card
     access: BoardAccess
 
 
@@ -66,6 +72,20 @@ def board_access(minimum: BoardRole) -> Callable[..., BoardAccess]:
     return dependency
 
 
+def _check_child(db: Session, user: User, item: BoardList | Card | None, minimum: BoardRole, name: str) -> BoardAccess:
+    """Access to something that lives on a board. A missing item and an item on a board you can't
+    see give the *same* 404, so nobody can tell whether an id exists on someone else's board."""
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{name} not found")
+    if item is None:
+        raise not_found
+    try:
+        return _check(db, user, item.board_id, minimum)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_404_NOT_FOUND:
+            raise not_found
+        raise
+
+
 def list_access(minimum: BoardRole) -> Callable[..., ListAccess]:
     """Dependency for routes with a `{list_id}` path parameter: find the list, then check its board."""
 
@@ -75,15 +95,24 @@ def list_access(minimum: BoardRole) -> Callable[..., ListAccess]:
         db: Session = Depends(get_db),
     ) -> ListAccess:
         board_list = db.get(BoardList, list_id)
-        if board_list is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
-        try:
-            access = _check(db, user, board_list.board_id, minimum)
-        except HTTPException as e:
-            if e.status_code == status.HTTP_404_NOT_FOUND:
-                # Same message as a missing list: don't reveal that it exists on someone else's board.
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
-            raise
+        access = _check_child(db, user, board_list, minimum, "List")
+        assert board_list is not None  # _check_child raised otherwise; this tells the type checker.
         return ListAccess(board_list=board_list, access=access)
+
+    return dependency
+
+
+def card_access(minimum: BoardRole) -> Callable[..., CardAccess]:
+    """Dependency for routes with a `{card_id}` path parameter."""
+
+    def dependency(
+        card_id: int,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> CardAccess:
+        card = db.get(Card, card_id)
+        access = _check_child(db, user, card, minimum, "Card")
+        assert card is not None
+        return CardAccess(card=card, access=access)
 
     return dependency

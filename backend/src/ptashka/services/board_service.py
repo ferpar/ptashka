@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, User, UserStatus
 from ptashka.services import ordering
@@ -44,6 +44,24 @@ def boards_for_user(db: Session, user: User, include_archived: bool = False) -> 
     return [(board, role) for board, role in db.execute(stmt)]
 
 
+def load_board_tree(db: Session, board_id: int) -> Board:
+    """Load a board with its lists, their cards, and its members' users in a fixed number of queries.
+
+    Without this, reading `board.lists` then each `lst.cards` (and each `member.user`) lazily
+    issues one query per list and per member: the N+1 problem. `selectinload` instead runs one
+    extra `SELECT ... WHERE parent_id IN (...)` per relationship, however many rows there are.
+    """
+    stmt = (
+        select(Board)
+        .where(Board.id == board_id)
+        .options(
+            selectinload(Board.lists).selectinload(BoardList.cards),
+            selectinload(Board.members).joinedload(BoardMember.user),
+        )
+    )
+    return db.scalars(stmt).one()
+
+
 def create_board(db: Session, creator: User, name: str, description: str | None, default_lists: bool) -> Board:
     board = Board(name=name.strip(), description=description, created_by_id=creator.id)
     # Appending to relationship lists adds the rows to the session together with the board.
@@ -57,11 +75,16 @@ def create_board(db: Session, creator: User, name: str, description: str | None,
     return board
 
 
-def set_archived(board_or_list: Board | BoardList, archived: bool) -> None:
-    if archived and board_or_list.archived_at is None:
-        board_or_list.archived_at = datetime.now(timezone.utc)
-    elif not archived:
-        board_or_list.archived_at = None
+def toggled_timestamp(current: datetime | None, on: bool) -> datetime | None:
+    """For "flag stored as a timestamp" columns (archived_at, completed_at):
+    turning on keeps an existing timestamp, so re-sending `true` doesn't rewrite history."""
+    if not on:
+        return None
+    return current or datetime.now(timezone.utc)
+
+
+def set_archived(item: Board | BoardList, archived: bool) -> None:
+    item.archived_at = toggled_timestamp(item.archived_at, archived)
 
 
 # ── Members ──
@@ -116,21 +139,10 @@ def _ordered_lists(db: Session, board_id: int, exclude_id: int | None = None) ->
     return list(db.scalars(stmt))
 
 
-def _place(siblings: list[BoardList], index: int) -> float:
-    """A position at `index` among `siblings`, renumbering them first if there's no room."""
-    position = ordering.position_at([s.position for s in siblings], index)
-    if position is None:
-        for sibling, new_position in zip(siblings, ordering.spread(len(siblings))):
-            sibling.position = new_position
-        position = ordering.position_at([s.position for s in siblings], index)
-        assert position is not None  # A freshly spread list always has room.
-    return position
-
-
 def create_list(db: Session, board: Board, name: str) -> BoardList:
     """New lists go at the end of the board."""
     siblings = _ordered_lists(db, board.id)
-    board_list = BoardList(board_id=board.id, name=name.strip(), position=_place(siblings, len(siblings)))
+    board_list = BoardList(board_id=board.id, name=name.strip(), position=ordering.place(siblings, len(siblings)))
     db.add(board_list)
     db.commit()
     db.refresh(board_list)
@@ -142,15 +154,12 @@ def move_list(db: Session, board_list: BoardList, after_id: int | None) -> Board
     if after_id == board_list.id:
         raise InvalidMoveError("A list can't be placed after itself")
     siblings = _ordered_lists(db, board_list.board_id, exclude_id=board_list.id)
-    if after_id is None:
-        index = 0
-    else:
-        ids = [s.id for s in siblings]
-        if after_id not in ids:
-            # Also covers a list on another board: you can't reference what isn't here.
-            raise InvalidMoveError("after_id is not a list on this board")
-        index = ids.index(after_id) + 1
-    board_list.position = _place(siblings, index)
+    try:
+        index = ordering.index_after([s.id for s in siblings], after_id)
+    except ValueError:
+        # Also covers a list on another board: you can't reference what isn't here.
+        raise InvalidMoveError("after_id is not a list on this board")
+    board_list.position = ordering.place(siblings, index)
     db.commit()
     db.refresh(board_list)
     return board_list

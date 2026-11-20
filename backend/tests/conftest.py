@@ -57,6 +57,22 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture
+def count_queries() -> Generator[list[str], None, None]:
+    """Records every SQL statement sent to the database while the test runs.
+
+    Usage: `count_queries.clear()`, do something, then `len(count_queries)`.
+    """
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args) -> None:  # type: ignore[no-untyped-def]
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    yield statements
+    event.remove(engine, "before_cursor_execute", record)
+
+
+@pytest.fixture
 def make_user(db_session: Session) -> Callable[..., User]:
     """Factory fixture: call it to create as many users as a test needs."""
 
