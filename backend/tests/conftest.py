@@ -9,7 +9,7 @@ from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -22,6 +22,15 @@ from ptashka.models.db import Base, User, UserRole, UserStatus
 # StaticPool: every connection is the *same* connection, otherwise each new
 # connection to ":memory:" would see its own empty database.
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _record) -> None:  # type: ignore[no-untyped-def]
+    """SQLite ignores foreign keys (and so ON DELETE CASCADE / SET NULL) unless asked.
+    Postgres always enforces them; turn them on so tests behave like production."""
+    dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
