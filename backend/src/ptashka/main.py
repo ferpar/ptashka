@@ -19,6 +19,7 @@ from ptashka.api.checklist import router as checklist_router
 from ptashka.api.comments import router as comments_router
 from ptashka.api.labels import router as labels_router
 from ptashka.api.lists import router as lists_router
+from ptashka.api.tokens import router as tokens_router
 
 app = FastAPI(title="Ptashka API", description="Trello-like task manager", version="0.1.0")
 
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(tokens_router)
 app.include_router(boards_router)
 app.include_router(lists_router)
 app.include_router(cards_router)

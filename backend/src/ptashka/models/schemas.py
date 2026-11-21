@@ -9,7 +9,7 @@ from datetime import datetime
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, EmailStr, Field
 
-from ptashka.models.db import BoardRole, LabelColor, UserRole, UserStatus
+from ptashka.models.db import BoardRole, LabelColor, TokenScope, UserRole, UserStatus
 
 # ── Auth ──
 
@@ -328,3 +328,37 @@ class CommentListResponse(BaseModel):
 
 class CommentRequest(BaseModel):
     body: str = Field(min_length=1, max_length=10000)
+
+
+# ── API tokens ──
+
+
+class ApiTokenSchema(BaseModel):
+    """A token as listed: never includes the secret."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    prefix: str  # "ptk_ab12cd34": enough to recognise it, useless to an attacker.
+    scope: TokenScope
+    created_at: datetime
+    last_used_at: datetime | None
+    expires_at: datetime | None
+    revoked_at: datetime | None
+
+
+class ApiTokenCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    scope: TokenScope = TokenScope.READ  # Least privilege by default.
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # None = never expires.
+
+
+class ApiTokenCreated(ApiTokenSchema):
+    """Returned once, at creation: the only time the secret is ever shown."""
+
+    token: str
+
+
+class ApiTokenListResponse(BaseModel):
+    tokens: list[ApiTokenSchema]

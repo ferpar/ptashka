@@ -2,7 +2,7 @@
 
 Groups:
 
-- **Accounts**: User, RefreshToken.
+- **Accounts**: User, RefreshToken, ApiToken.
 - **Boards**: Board, BoardMember (who can see/edit a board), BoardList (a column), Card.
 - **Card details**: Label + CardLabel, CardAssignee, ChecklistItem, Comment.
 """
@@ -116,6 +116,34 @@ class RefreshToken(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     user: Mapped[User] = relationship(back_populates="refresh_tokens")
+
+
+class TokenScope(str, PyEnum):
+    """What a personal API token may do, on top of its user's board roles (the lower of the two wins)."""
+
+    READ = "read"  # GET / HEAD / OPTIONS only
+    WRITE = "write"  # anything the user's board roles allow
+
+
+class ApiToken(Base):
+    """A personal API token for scripts and agents. Only its SHA-256 hash is stored: the token itself
+    is shown once, when created."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))  # "Claude research agent"
+    # The first characters, kept so listings can show which token is which ("ptk_ab12cd34…").
+    prefix: Mapped[str] = mapped_column(String(16))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    scope: Mapped[TokenScope] = mapped_column(_enum(TokenScope))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # None = never
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+    user: Mapped[User] = relationship()
 
 
 # ── Boards ──
