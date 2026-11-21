@@ -1,16 +1,19 @@
 """Card endpoints addressed by card id (creating a card lives under /api/lists/{id}/cards)."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import AwareDatetime
 
 from ptashka.api.activity import Limit, page
-from ptashka.api.presenters import card_detail
+from ptashka.api.presenters import card_detail, search_hits
 from ptashka.auth.board_access import CardAccess, card_access, check_fields
+from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import DbSession
-from ptashka.models.db import BoardRole
+from ptashka.models.db import BoardRole, User
 from ptashka.models.schemas import (
     ActivityPage,
     CardDetail,
     CardMoveRequest,
+    CardSearchResponse,
     CardUpdateRequest,
     ChecklistItemCreateRequest,
     ChecklistItemSchema,
@@ -18,12 +21,57 @@ from ptashka.models.schemas import (
     CommentRequest,
     CommentSchema,
 )
-from ptashka.services import activity_service, card_service, checklist_service, comment_service, label_service
+from ptashka.services import activity_service, card_service, checklist_service, comment_service, label_service, search_service
+from ptashka.services.search_service import CardFilters
 from ptashka.services.board_service import InvalidMoveError
 
 router = APIRouter(prefix="/api/cards", tags=["cards"])
 
 NO_CONTENT = Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("", response_model=CardSearchResponse)
+def search(
+    db: DbSession,
+    assignee: str | None = Query(default=None, description='"me", or a user id'),
+    board_id: int | None = None,
+    label: str | None = Query(default=None, max_length=50, description="A label name (case-insensitive), on any board"),
+    due_before: AwareDatetime | None = None,
+    due_after: AwareDatetime | None = None,
+    overdue: bool = False,
+    completed: bool | None = None,
+    archived: bool = Query(default=False, description="Include archived cards, lists and boards"),
+    q: str | None = Query(default=None, max_length=200, description="Text in title or description"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+) -> CardSearchResponse:
+    """Search cards across every board you're a member of. Soonest due first, undated last.
+
+    e.g. your open tasks: `?assignee=me&completed=false`; this week's: add `&due_before=...`.
+    """
+    if assignee is None or assignee == "me":
+        assignee_id = user.id if assignee == "me" else None
+    elif assignee.isdigit():
+        assignee_id = int(assignee)
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail='assignee must be "me" or a user id')
+    filters = CardFilters(
+        assignee_id=assignee_id,
+        board_id=board_id,
+        label=label,
+        due_before=due_before,
+        due_after=due_after,
+        overdue=overdue,
+        completed=completed,
+        include_archived=archived,
+        text=q,
+    )
+    hits = search_service.search_cards(db, user.id, filters, limit + 1, offset)  # One extra: is there more?
+    return CardSearchResponse(
+        cards=search_hits(db, hits[:limit]),
+        next_offset=offset + limit if len(hits) > limit else None,
+    )
 
 
 @router.get("/{card_id}", response_model=CardDetail)

@@ -239,5 +239,9 @@ def stats_for_board(db: Session, board_id: int) -> defaultdict[int, CardStats]:
     return _stats(db, Card.board_id == board_id)
 
 
+def stats_for_cards(db: Session, card_ids: list[int]) -> defaultdict[int, CardStats]:
+    return _stats(db, Card.id.in_(card_ids))
+
+
 def stats_for_card(db: Session, card_id: int) -> CardStats:
     return _stats(db, Card.id == card_id)[card_id]

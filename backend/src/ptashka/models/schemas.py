@@ -392,3 +392,20 @@ class ActivityFeed(BaseModel):
 
     activities: list[ActivitySchema]
     next_since: int
+
+
+# ── Search ──
+
+
+class CardSearchHit(CardSchema):
+    """A card in search results: like on the board, plus where it lives."""
+
+    board_name: str
+    list_name: str
+
+
+class CardSearchResponse(BaseModel):
+    """Pass `next_offset` as `?offset=` for the next page; null means no more."""
+
+    cards: list[CardSearchHit]
+    next_offset: int | None
