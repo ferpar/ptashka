@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from ptashka.auth.board_access import BoardAccess, board_access
+from ptashka.auth.board_access import BoardAccess, board_access, check_fields
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import get_db
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
@@ -106,11 +106,9 @@ def update_board(
 ) -> BoardDetail:
     """Rename or describe the board (editors). Archiving/restoring (`archived`) needs an owner."""
     changes = request.model_dump(exclude_unset=True)
-    if "archived" in changes:
-        if not access.role.includes(BoardRole.OWNER):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requires owner access")
-        if changes["archived"] is not None:
-            board_service.set_archived(access.board, changes["archived"])
+    check_fields(access.role, changes, allowed={"name", "description"}, above=BoardRole.OWNER)
+    if changes.get("archived") is not None:
+        board_service.set_archived(access.board, changes["archived"])
     if changes.get("name") is not None:
         access.board.name = changes["name"].strip()
     if "description" in changes:  # null is allowed here: it clears the description.

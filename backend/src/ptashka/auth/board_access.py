@@ -14,7 +14,7 @@ Site admins get no special access to boards: approving accounts doesn't mean
 reading everyone's tasks.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
@@ -61,6 +61,20 @@ class ChecklistItemAccess:
 class CommentAccess:
     comment: Comment
     access: BoardAccess
+
+
+def check_fields(role: BoardRole, changes: Iterable[str], allowed: set[str], above: BoardRole) -> None:
+    """Field-level permissions for PATCH endpoints shared by several roles.
+
+    The route admits the lower role; then any field outside `allowed` requires `above`.
+    E.g. a contributor may PATCH a card's `completed`, but `title` requires editor.
+    """
+    extra = set(changes) - allowed
+    if extra and not role.includes(above):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Requires {above.value} access to change: {', '.join(sorted(extra))}",
+        )
 
 
 def _check(db: Session, user: User, board_id: int, minimum: BoardRole) -> BoardAccess:

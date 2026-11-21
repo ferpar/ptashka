@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from ptashka.api.presenters import card_detail
-from ptashka.auth.board_access import CardAccess, card_access
+from ptashka.auth.board_access import CardAccess, card_access, check_fields
 from ptashka.db.database import get_db
 from ptashka.models.db import BoardRole
 from ptashka.models.schemas import (
@@ -33,15 +33,18 @@ def get_card(access: CardAccess = Depends(card_access(BoardRole.VIEWER)), db: Se
 @router.patch("/{card_id}", response_model=CardDetail)
 def update_card(
     request: CardUpdateRequest,
-    access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
+    access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> CardDetail:
     """Edit fields. `completed` / `archived` take booleans; `description` / `due_at` can be cleared with null.
 
+    Contributors may only send `completed` (and `version`); every other field requires editor.
     Send the `version` you loaded to get a 409 instead of overwriting a change made since.
     """
+    changes = request.model_dump(exclude_unset=True)
+    check_fields(access.access.role, changes, allowed={"completed", "version"}, above=BoardRole.EDITOR)
     try:
-        card = card_service.update_card(db, access.card, request.model_dump(exclude_unset=True))
+        card = card_service.update_card(db, access.card, changes)
     except card_service.VersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -53,10 +56,10 @@ def update_card(
 @router.post("/{card_id}/move", response_model=CardDetail)
 def move_card(
     request: CardMoveRequest,
-    access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
+    access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> CardDetail:
-    """Move within a list or to another list on the same board."""
+    """Move within a list or to another list on the same board (contributors and up)."""
     try:
         card = card_service.move_card(db, access.card, request.list_id, request.after_id)
     except InvalidMoveError as e:
@@ -97,11 +100,18 @@ def remove_label(
     return NO_CONTENT
 
 
+def _check_self_or_editor(access: CardAccess, user_id: int) -> None:
+    """Contributors can take a card themselves ("I'll do it"); handing out work is for editors."""
+    if user_id != access.access.user.id and not access.access.role.includes(BoardRole.EDITOR):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Contributors can only assign themselves")
+
+
 @router.put("/{card_id}/assignees/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def assign(
-    user_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR)), db: Session = Depends(get_db)
+    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)), db: Session = Depends(get_db)
 ) -> Response:
-    """Assign a board member (any role) to the card."""
+    """Assign a board member (any role) to the card. Contributors may only assign themselves."""
+    _check_self_or_editor(access, user_id)
     try:
         card_service.assign(db, access.card, user_id)
     except card_service.NotAMemberError as e:
@@ -111,8 +121,10 @@ def assign(
 
 @router.delete("/{card_id}/assignees/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def unassign(
-    user_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR)), db: Session = Depends(get_db)
+    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)), db: Session = Depends(get_db)
 ) -> Response:
+    """Contributors may only unassign themselves."""
+    _check_self_or_editor(access, user_id)
     card_service.unassign(db, access.card, user_id)
     return NO_CONTENT
 
@@ -142,7 +154,7 @@ def list_comments(
 @router.post("/{card_id}/comments", response_model=CommentSchema, status_code=status.HTTP_201_CREATED)
 def add_comment(
     request: CommentRequest,
-    access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
+    access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> CommentSchema:
     comment = comment_service.add_comment(db, access.card, access.access.user, request.body)

@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from ptashka.auth.board_access import ChecklistItemAccess, checklist_item_access
+from ptashka.auth.board_access import ChecklistItemAccess, check_fields, checklist_item_access
 from ptashka.db.database import get_db
 from ptashka.models.db import BoardRole
 from ptashka.models.schemas import ChecklistItemSchema, ChecklistItemUpdateRequest, MoveRequest
@@ -16,11 +16,13 @@ router = APIRouter(prefix="/api/checklist-items", tags=["checklist"])
 @router.patch("/{item_id}", response_model=ChecklistItemSchema)
 def update_item(
     request: ChecklistItemUpdateRequest,
-    access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.EDITOR)),
+    access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> ChecklistItemSchema:
-    """Edit the text, or tick (`done: true`) / untick (`done: false`) the item."""
-    item = checklist_service.update_item(db, access.item, request.model_dump(exclude_unset=True))
+    """Tick (`done: true`) / untick (`done: false`) the item (contributors), or edit its text (editors)."""
+    changes = request.model_dump(exclude_unset=True)
+    check_fields(access.access.role, changes, allowed={"done"}, above=BoardRole.EDITOR)
+    item = checklist_service.update_item(db, access.item, changes)
     return ChecklistItemSchema.model_validate(item)
 
 

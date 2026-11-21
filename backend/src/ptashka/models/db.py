@@ -124,8 +124,11 @@ class RefreshToken(Base):
 class BoardRole(str, PyEnum):
     """What a member may do on one board. Ordered: each role includes the ones before it."""
 
-    VIEWER = "viewer"  # read everything
-    EDITOR = "editor"  # + create/edit/move lists and cards
+    VIEWER = "viewer"  # read everything (strictly read-only)
+    # + work on cards without managing them: move cards, complete/reopen, tick checklist items,
+    # comment, assign/unassign *themselves*. Meant for people (or agents) doing the tasks.
+    CONTRIBUTOR = "contributor"
+    EDITOR = "editor"  # + create/edit/archive cards, lists, labels, checklists; assign anyone
     OWNER = "owner"  # + rename/archive/delete the board, manage members
 
     @property

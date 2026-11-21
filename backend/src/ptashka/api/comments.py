@@ -24,7 +24,7 @@ def _is_author(access: CommentAccess) -> bool:
 @router.patch("/{comment_id}", response_model=CommentSchema)
 def edit_comment(
     request: CommentRequest,
-    access: CommentAccess = Depends(comment_access(BoardRole.EDITOR)),
+    access: CommentAccess = Depends(comment_access(BoardRole.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> CommentSchema:
     if not _is_author(access):
