@@ -1,0 +1,55 @@
+.page { padding: 24px 16px; max-width: 1100px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+.authPage { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.authCard {
+  width: min(380px, 100%);
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.authCard label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
+
+.boardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.boardTile {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text);
+  text-decoration: none;
+  border-top: 4px solid var(--primary);
+}
+a.boardTile:hover { box-shadow: var(--shadow-lg); }
+.role { margin-top: auto; color: var(--muted); text-transform: capitalize; }
+
+.taskGroup { display: flex; flex-direction: column; gap: 6px; }
+.taskGroup h2 { font-size: 15px; margin-top: 8px; }
+.taskRow {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  text-decoration: none;
+  flex-wrap: wrap;
+}
+.taskRow > span:first-child { flex: 1; min-width: 160px; }
+
+.secret { background: var(--surface); border: 2px solid var(--success); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.secret code { word-break: break-all; background: var(--surface-2); padding: 8px; border-radius: 6px; }
+.tokenForm input { flex: 1; min-width: 200px; }
+.table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; display: block; overflow-x: auto; }
+.table th, .table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.table th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.revoked td { opacity: 0.55; }

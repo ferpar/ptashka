@@ -1,0 +1,21 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(9 30 66 / 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  overflow-y: auto;
+}
+.dialog {
+  position: relative;
+  width: min(520px, 100%);
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+}
+.wide { width: min(780px, 100%); }
+.close { position: absolute; top: 12px; right: 12px; padding: 4px 8px; }

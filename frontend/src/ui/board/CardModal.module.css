@@ -1,0 +1,29 @@
+.layout { display: grid; grid-template-columns: 1fr 200px; gap: 24px; }
+.main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.main section { display: flex; flex-direction: column; gap: 8px; }
+.main h3, .side h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.title { font-size: 20px; padding-right: 32px; }
+.titleInput { font-size: 20px; font-weight: 700; border-color: transparent; background: transparent; padding: 4px; margin-right: 32px; }
+.titleInput:hover, .titleInput:focus { border-color: var(--border); background: var(--surface); }
+.fields { display: flex; gap: 20px; flex-wrap: wrap; }
+
+.toggleChip { background: transparent; border: 2px solid var(--chip); padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.toggleChip.on { background: var(--chip); color: #172b4d; }
+.person { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid var(--border); padding: 3px 10px 3px 3px; border-radius: 999px; }
+.person.on { border-color: var(--primary); background: var(--surface-3); }
+
+.description { white-space: pre-wrap; background: var(--surface-2); border-radius: 6px; padding: 10px; margin: 0; cursor: text; min-height: 40px; }
+.checkItem { display: flex; align-items: center; gap: 8px; }
+.checkItem span { flex: 1; }
+.checked { text-decoration: line-through; color: var(--muted); }
+
+.comments { display: flex; flex-direction: column; gap: 12px; }
+.comment { display: flex; gap: 8px; }
+.commentBody { margin: 2px 0 0; white-space: pre-wrap; background: var(--surface-2); padding: 8px 10px; border-radius: 6px; }
+
+.side { display: flex; flex-direction: column; gap: 8px; }
+.history { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; }
+}
