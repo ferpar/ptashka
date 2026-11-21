@@ -670,7 +670,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health Check */
+        /**
+         * Health Check
+         * @description For Docker/Coolify healthchecks: healthy only if the database answers too.
+         *
+         *     A deploy whose app starts but can't reach its database is a failed deploy; saying "healthy"
+         *     there would let it replace a working version.
+         */
         get: operations["health_check_health_get"];
         put?: never;
         post?: never;
@@ -2961,9 +2967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": unknown;
                 };
             };
         };

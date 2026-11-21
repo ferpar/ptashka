@@ -1,0 +1,59 @@
+# Production compose for Coolify (Docker Compose build pack).
+#
+# - Set POSTGRES_PASSWORD and JWT_SECRET_KEY in Coolify's environment variables. `:?` makes a
+#   missing one fail the deploy instead of silently using a development default, and the backend
+#   itself refuses to start with a weak JWT secret (PTASHKA_ENV=production).
+# - No host ports: Coolify's proxy routes your domain to the frontend on port 3000 (and terminates
+#   TLS); nginx there forwards /api to the backend.
+# - The database lives in the `postgres_data` named volume. Coolify keeps volumes across
+#   redeploys; only deleting the resource *with* its volumes removes the data.
+# - First admin, once deployed (Coolify: the backend container's terminal):
+#     python -m ptashka.cli.create_admin --email you@example.com
+
+services:
+  db:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "idle_in_transaction_session_timeout=60s"]
+    environment:
+      POSTGRES_USER: ptashka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ptashka
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ptashka"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      PTASHKA_ENV: production
+      DATABASE_URL: postgresql://ptashka:${POSTGRES_PASSWORD}@db:5432/ptashka
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY to a long random string}
+    expose:
+      - "8020"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    expose:
+      - "3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

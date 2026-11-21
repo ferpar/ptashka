@@ -1,0 +1,51 @@
+# The whole app in containers, as in production: http://localhost:3021
+#
+#   docker compose up --build
+#   docker compose exec backend python -m ptashka.cli.create_admin --email you@example.com
+#
+# Its own project name, so it never touches the development database container
+# (docker-compose.dev.yml), which would otherwise share the default project name.
+name: ptashka-local
+
+services:
+  db:
+    image: postgres:16-alpine
+    # Cut off transactions left open by a bug, instead of letting them hold locks indefinitely.
+    command: ["postgres", "-c", "idle_in_transaction_session_timeout=60s"]
+    environment:
+      POSTGRES_USER: ptashka
+      POSTGRES_PASSWORD: ptashka
+      POSTGRES_DB: ptashka
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ptashka"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://ptashka:ptashka@db:5432/ptashka
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-secret-key-change-in-production}"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8020/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s  # Migrations run first.
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3021:3000"  # The only published port: the API is reached through nginx at /api.
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

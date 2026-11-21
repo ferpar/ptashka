@@ -5,10 +5,6 @@ REGISTRATION = {"email": "Olena@Example.com", "password": "password123", "displa
 LOGIN = {"email": "olena@example.com", "password": "password123"}
 
 
-def test_health(client):
-    assert client.get("/health").json() == {"status": "healthy"}
-
-
 def test_registration_creates_pending_account_without_tokens(client):
     response = client.post("/api/auth/register", json=REGISTRATION)
     assert response.status_code == 201

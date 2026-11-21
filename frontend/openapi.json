@@ -2589,19 +2589,14 @@
     "/health": {
       "get": {
         "summary": "Health Check",
+        "description": "For Docker/Coolify healthchecks: healthy only if the database answers too.\n\nA deploy whose app starts but can't reach its database is a failed deploy; saying \"healthy\"\nthere would let it replace a working version.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Health Check Health Get"
-                }
+                "schema": {}
               }
             }
           }

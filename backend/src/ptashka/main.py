@@ -9,6 +9,8 @@ import os
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm.exc import StaleDataError
 
 from ptashka.api.activity import router as activity_router
@@ -21,6 +23,12 @@ from ptashka.api.comments import router as comments_router
 from ptashka.api.labels import router as labels_router
 from ptashka.api.lists import router as lists_router
 from ptashka.api.tokens import router as tokens_router
+from ptashka.auth.jwt import JWT_SECRET_KEY
+from ptashka.config import ENVIRONMENT, validate_settings
+from ptashka.db.database import DbSession
+
+# Refuse to start with unsafe production settings (see config.py), before serving anything.
+validate_settings(ENVIRONMENT, JWT_SECRET_KEY)
 
 app = FastAPI(title="Ptashka API", description="Trello-like task manager", version="0.1.0")
 
@@ -56,6 +64,15 @@ def concurrent_modification(_request: Request, _exc: StaleDataError) -> JSONResp
     )
 
 
-@app.get("/health")
-def health_check() -> dict[str, str]:
-    return {"status": "healthy"}
+@app.get("/health", response_model=None)
+def health_check(db: DbSession) -> dict[str, str] | JSONResponse:
+    """For Docker/Coolify healthchecks: healthy only if the database answers too.
+
+    A deploy whose app starts but can't reach its database is a failed deploy; saying "healthy"
+    there would let it replace a working version.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except OperationalError:
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "unhealthy", "database": "unreachable"})
+    return {"status": "healthy", "database": "ok"}
