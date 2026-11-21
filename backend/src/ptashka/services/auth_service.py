@@ -5,7 +5,9 @@ Python exceptions and the routers in `api/` translate them into status codes.
 That keeps the rules easy to test and reuse (the CLI calls them too).
 """
 
+import secrets
 from datetime import datetime, timezone
+from functools import cache
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,6 +37,13 @@ class InvalidRefreshTokenError(Exception):
     pass
 
 
+@cache
+def _dummy_hash() -> str:
+    """A real bcrypt hash of a random secret, computed once on first use: checking a password against
+    it costs exactly as much as checking a real one, and nothing can ever match it."""
+    return hash_password(secrets.token_urlsafe(32))
+
+
 def normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -42,11 +51,14 @@ def normalize_email(email: str) -> str:
 def register_user(db: Session, email: str, password: str, display_name: str) -> User:
     """Create a PENDING account. An admin must activate it before it can log in."""
     email = normalize_email(email)
+    # bcrypt first (~170 ms of CPU): the session only takes a database connection at its first
+    # query, so hashing before any query means no connection sits idle while we hash.
+    hashed = hash_password(password)
     if db.scalar(select(User).where(User.email == email)):
         raise UserExistsError("Email already registered")
     user = User(
         email=email,
-        hashed_password=hash_password(password),
+        hashed_password=hashed,
         display_name=display_name.strip(),
         role=UserRole.USER,
         status=UserStatus.PENDING,
@@ -59,7 +71,11 @@ def register_user(db: Session, email: str, password: str, display_name: str) -> 
 
 def authenticate_user(db: Session, email: str, password: str) -> User:
     user = db.scalar(select(User).where(User.email == normalize_email(email)))
-    if user is None or not verify_password(password, user.hashed_password):
+    # Always run bcrypt, against a dummy hash if the email is unknown. Otherwise unknown emails would
+    # be rejected in ~5 ms and known ones in ~170 ms, and that timing difference alone would reveal
+    # which emails are registered (a timing attack).
+    password_ok = verify_password(password, user.hashed_password if user else _dummy_hash())
+    if user is None or not password_ok:
         raise InvalidCredentialsError("Invalid email or password")
     # Checked only after the password, so this can't be used to probe which emails exist.
     if user.status != UserStatus.ACTIVE:

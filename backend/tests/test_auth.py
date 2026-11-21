@@ -1,3 +1,4 @@
+from ptashka.services import auth_service
 from tests.conftest import auth_headers
 
 REGISTRATION = {"email": "Olena@Example.com", "password": "password123", "display_name": "Olena"}
@@ -95,3 +96,26 @@ def test_profile_update(client, user):
     response = client.patch("/api/auth/me", json={"display_name": "New Name"}, headers=auth_headers(user))
     assert response.status_code == 200
     assert response.json()["display_name"] == "New Name"
+
+
+def test_unknown_emails_still_run_bcrypt(client, user, monkeypatch):
+    """Timing-attack guard: unknown and known emails must cost the same bcrypt check.
+    (Asserted by counting calls, not by measuring time, which would be flaky.)"""
+    calls = []
+    real_verify = auth_service.verify_password
+    monkeypatch.setattr(auth_service, "verify_password", lambda pw, h: calls.append(h) or real_verify(pw, h))
+
+    assert client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever1"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": user.email, "password": "wrong-pass"}).status_code == 401
+    assert len(calls) == 2
+
+
+def test_registration_hashes_before_touching_the_database(client, count_queries, monkeypatch):
+    """No connection should sit idle in a transaction while bcrypt runs (~170 ms)."""
+    queries_before_hash = []
+    real_hash = auth_service.hash_password
+    monkeypatch.setattr(auth_service, "hash_password", lambda pw: queries_before_hash.append(len(count_queries)) or real_hash(pw))
+
+    count_queries.clear()
+    assert client.post("/api/auth/register", json=REGISTRATION).status_code == 201
+    assert queries_before_hash == [0]
