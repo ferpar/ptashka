@@ -3,7 +3,10 @@
 import os
 from logging.config import fileConfig
 
+from typing import Any, Literal
+
 from alembic import context
+from alembic.autogenerate.api import AutogenContext
 from sqlalchemy import engine_from_config, pool
 
 from ptashka.db.database import normalize_database_url
@@ -22,7 +25,7 @@ if database_url:
     config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
 
 
-def render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+def render_item(type_: str, obj: Any, autogen_context: AutogenContext) -> str | Literal[False]:
     """Write UTCDateTime as a plain sa.DateTime in migrations: the database only sees the
     underlying type, and migrations shouldn't import app code that may change later."""
     if type_ == "type" and isinstance(obj, UTCDateTime):

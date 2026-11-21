@@ -17,14 +17,20 @@ to test. `place` applies them to anything with a `position` attribute.
 from collections.abc import Sequence
 from typing import Protocol
 
+from sqlalchemy.orm import Mapped
+
 
 class Positioned(Protocol):
-    """Anything with a float `position`: BoardList and Card both qualify, without inheriting from this.
+    """Any model with a float `position` column: BoardList and Card both qualify, without inheriting
+    from this. That's structural typing — the type checker accepts any object with the right shape.
 
-    That's structural typing — the type checker accepts any object with the right shape.
+    Why `Mapped[float]` and not `float`: on SQLAlchemy models, `position` is declared as a
+    `Mapped[float]` descriptor that *returns* a float when read on an instance. Type checkers
+    compare the declared types, and `Mapped[float]` is not `float`, so the protocol states the
+    shape models actually have.
     """
 
-    position: float
+    position: Mapped[float]
 
 
 GAP = 1024.0
