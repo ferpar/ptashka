@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ptashka.auth.board_access import BoardAccess, board_access, check_fields
 from ptashka.auth.dependencies import get_current_user
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
 from ptashka.models.schemas import (
     BoardCreateRequest,
@@ -70,9 +70,9 @@ def _detail(db: Session, access: BoardAccess, include_archived: bool) -> BoardDe
 
 @router.get("", response_model=BoardListResponse)
 def list_boards(
+    db: DbSession,
     include_archived: bool = False,  # A plain typed parameter becomes a query param: ?include_archived=true
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> BoardListResponse:
     """The boards you're a member of."""
     rows = board_service.boards_for_user(db, user, include_archived)
@@ -81,7 +81,8 @@ def list_boards(
 
 @router.post("", response_model=BoardDetail, status_code=status.HTTP_201_CREATED)
 def create_board(
-    request: BoardCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    db: DbSession,
+    request: BoardCreateRequest, user: User = Depends(get_current_user)
 ) -> BoardDetail:
     """Create a board. You become its owner."""
     board = board_service.create_board(db, user, request.name, request.description, request.default_lists)
@@ -90,9 +91,9 @@ def create_board(
 
 @router.get("/{board_id}", response_model=BoardDetail)
 def get_board(
+    db: DbSession,
     include_archived: bool = False,
     access: BoardAccess = Depends(board_access(BoardRole.VIEWER)),
-    db: Session = Depends(get_db),
 ) -> BoardDetail:
     """The board with its lists, cards and members. Archived lists and cards are left out unless asked for."""
     return _detail(db, access, include_archived)
@@ -100,9 +101,9 @@ def get_board(
 
 @router.patch("/{board_id}", response_model=BoardDetail)
 def update_board(
+    db: DbSession,
     request: BoardUpdateRequest,
     access: BoardAccess = Depends(board_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> BoardDetail:
     """Rename or describe the board (editors). Archiving/restoring (`archived`) needs an owner."""
     changes = request.model_dump(exclude_unset=True)
@@ -113,17 +114,18 @@ def update_board(
         access.board.name = changes["name"].strip()
     if "description" in changes:  # null is allowed here: it clears the description.
         access.board.description = changes["description"]
-    db.commit()
+    db.flush()
     return _detail(db, access, include_archived=False)
 
 
 @router.delete("/{board_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_board(
-    access: BoardAccess = Depends(board_access(BoardRole.OWNER)), db: Session = Depends(get_db)
+    db: DbSession,
+    access: BoardAccess = Depends(board_access(BoardRole.OWNER))
 ) -> Response:
     """Delete the board and everything on it, permanently. Prefer archiving."""
     db.delete(access.board)
-    db.commit()
+    db.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -145,9 +147,9 @@ def list_members(access: BoardAccess = Depends(board_access(BoardRole.VIEWER))) 
 
 @router.post("/{board_id}/members", response_model=MemberSchema, status_code=status.HTTP_201_CREATED)
 def add_member(
+    db: DbSession,
     request: MemberAddRequest,
     access: BoardAccess = Depends(board_access(BoardRole.OWNER)),
-    db: Session = Depends(get_db),
 ) -> BoardMember:
     """Share the board with an active user, by email."""
     try:
@@ -160,10 +162,10 @@ def add_member(
 
 @router.patch("/{board_id}/members/{user_id}", response_model=MemberSchema)
 def update_member(
+    db: DbSession,
     user_id: int,
     request: MemberUpdateRequest,
     access: BoardAccess = Depends(board_access(BoardRole.OWNER)),
-    db: Session = Depends(get_db),
 ) -> BoardMember:
     member = _get_member(db, access.board.id, user_id)
     try:
@@ -174,9 +176,9 @@ def update_member(
 
 @router.delete("/{board_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_member(
+    db: DbSession,
     user_id: int,
     access: BoardAccess = Depends(board_access(BoardRole.VIEWER)),
-    db: Session = Depends(get_db),
 ) -> Response:
     """Owners can remove anyone; any member can remove themselves (leave the board)."""
     if user_id != access.user.id and not access.role.includes(BoardRole.OWNER):
@@ -194,9 +196,9 @@ def remove_member(
 
 @router.post("/{board_id}/lists", response_model=ListSchema, status_code=status.HTTP_201_CREATED)
 def create_list(
+    db: DbSession,
     request: ListCreateRequest,
     access: BoardAccess = Depends(board_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> ListSchema:
     """Add a list at the end of the board."""
     return ListSchema.model_validate(board_service.create_list(db, access.board, request.name))
@@ -207,7 +209,8 @@ def create_list(
 
 @router.get("/{board_id}/labels", response_model=LabelListResponse)
 def list_labels(
-    access: BoardAccess = Depends(board_access(BoardRole.VIEWER)), db: Session = Depends(get_db)
+    db: DbSession,
+    access: BoardAccess = Depends(board_access(BoardRole.VIEWER))
 ) -> LabelListResponse:
     labels = label_service.labels_for_board(db, access.board.id)
     return LabelListResponse(labels=[LabelSchema.model_validate(label) for label in labels])
@@ -215,9 +218,9 @@ def list_labels(
 
 @router.post("/{board_id}/labels", response_model=LabelSchema, status_code=status.HTTP_201_CREATED)
 def create_label(
+    db: DbSession,
     request: LabelCreateRequest,
     access: BoardAccess = Depends(board_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> LabelSchema:
     try:
         label = label_service.create_label(db, access.board, request.name, request.color)

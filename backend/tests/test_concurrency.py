@@ -1,9 +1,6 @@
 """Concurrency tests that need real Postgres: SQLite has no row locks, so FOR UPDATE is a no-op there.
 
-Skipped unless TEST_POSTGRES_URL points at a *throwaway* database (its tables are dropped):
-
-    docker exec ptashka-db-1 createdb -U ptashka ptashka_test   # once
-    TEST_POSTGRES_URL=postgresql://ptashka:ptashka@localhost:5435/ptashka_test .venv/bin/pytest -m postgres
+Skipped unless TEST_POSTGRES_URL is set (see conftest.py); `-m postgres` runs only these.
 """
 
 import os
@@ -44,10 +41,11 @@ def test_concurrent_moves_into_the_same_gap_get_distinct_positions(pg_session_fa
     Without the list lock, both read positions [A=1024, B=2048], both compute 1536, and the cards tie.
     With it, the second request waits, then sees the first card already there and picks another slot.
     """
-    with pg_session_factory() as db:
+    # Services don't commit: `factory.begin()` is the unit of work here, committing when the block ends.
+    with pg_session_factory.begin() as db:
         user = User(email="u@example.com", hashed_password="x", display_name="u", status=UserStatus.ACTIVE)
         db.add(user)
-        db.commit()
+        db.flush()
         board = board_service.create_board(db, user, "Race", None, default_lists=True)
         todo, doing = board.lists[0], board.lists[1]
         a = card_service.create_card(db, todo, user, "A")
@@ -69,7 +67,7 @@ def test_concurrent_moves_into_the_same_gap_get_distinct_positions(pg_session_fa
 
     def move(card_id: int) -> None:
         try:
-            with pg_session_factory() as db:  # Each "request" has its own session and connection.
+            with pg_session_factory.begin() as db:  # Each "request": own session, connection, transaction.
                 card = db.get(Card, card_id)
                 assert card is not None
                 start.wait()  # Both threads call move_card at the same moment.
@@ -94,10 +92,10 @@ def test_concurrent_moves_into_the_same_gap_get_distinct_positions(pg_session_fa
 
 def test_lists_are_locked_too(pg_session_factory):
     """Sanity check that the lock is real: a second transaction can't lock the same list until the first ends."""
-    with pg_session_factory() as db:
+    with pg_session_factory.begin() as db:
         user = User(email="u@example.com", hashed_password="x", display_name="u", status=UserStatus.ACTIVE)
         db.add(user)
-        db.commit()
+        db.flush()
         list_id = board_service.create_board(db, user, "Lock", None, default_lists=True).lists[0].id
 
     from ptashka.services import locks

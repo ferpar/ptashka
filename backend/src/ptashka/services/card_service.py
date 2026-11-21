@@ -58,7 +58,7 @@ def create_card(
         created_by_id=creator.id,
     )
     db.add(card)
-    db.commit()
+    db.flush()
     db.refresh(card)
     return card
 
@@ -74,24 +74,26 @@ def update_card(db: Session, card: Card, changes: dict[str, Any]) -> Card:
         # Check 1 (cheap, gives a clear error): the client's copy is already outdated.
         raise VersionConflictError(card.version)
 
-    if changes.get("title") is not None:
-        card.title = changes["title"].strip()
-    # These can be cleared with null.
-    if "description" in changes:
-        card.description = changes["description"]
-    if "due_at" in changes:
-        card.due_at = changes["due_at"]
-    # Booleans in the API, timestamps in the database.
-    if changes.get("completed") is not None:
-        card.completed_at = toggled_timestamp(card.completed_at, changes["completed"])
-    if changes.get("archived") is not None:
-        card.archived_at = toggled_timestamp(card.archived_at, changes["archived"])
     try:
-        db.commit()
+        # A savepoint: changes made inside are flushed when the block ends. If that flush fails,
+        # only the savepoint is rolled back; the request's transaction stays usable, and the
+        # decision to commit or roll back the whole request stays with the unit of work.
+        with db.begin_nested():
+            if changes.get("title") is not None:
+                card.title = changes["title"].strip()
+            # These can be cleared with null.
+            if "description" in changes:
+                card.description = changes["description"]
+            if "due_at" in changes:
+                card.due_at = changes["due_at"]
+            # Booleans in the API, timestamps in the database.
+            if changes.get("completed") is not None:
+                card.completed_at = toggled_timestamp(card.completed_at, changes["completed"])
+            if changes.get("archived") is not None:
+                card.archived_at = toggled_timestamp(card.archived_at, changes["archived"])
     except StaleDataError:
         # Check 2 (the race): another request committed between our read and our write.
         # The UPDATE ... WHERE version = N matched no row, so nothing was overwritten.
-        db.rollback()
         db.refresh(card)
         raise VersionConflictError(card.version)
     db.refresh(card)
@@ -127,14 +129,14 @@ def move_card(db: Session, card: Card, list_id: int, after_id: int | None) -> Ca
     # composite key from the target list and keep source.cards / target.cards in sync in memory.
     card.board_list = target
     card.position = ordering.place(siblings, index)
-    db.commit()
+    db.flush()
     db.refresh(card)
     return card
 
 
 def delete_card(db: Session, card: Card) -> None:
     db.delete(card)
-    db.commit()
+    db.flush()
 
 
 # ── Assignees: PUT/DELETE semantics, so both are idempotent ──
@@ -147,14 +149,14 @@ def assign(db: Session, card: Card, user_id: int) -> None:
         raise NotAMemberError("Only members of the board can be assigned")
     if db.get(CardAssignee, (card.id, user_id)) is None:
         db.add(CardAssignee(card_id=card.id, user_id=user_id, board_id=card.board_id))
-        db.commit()
+        db.flush()
 
 
 def unassign(db: Session, card: Card, user_id: int) -> None:
     link = db.get(CardAssignee, (card.id, user_id))
     if link is not None:
         db.delete(link)
-        db.commit()
+        db.flush()
 
 
 # ── Counts shown on cards ──

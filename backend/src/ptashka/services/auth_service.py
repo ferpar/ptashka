@@ -52,7 +52,7 @@ def register_user(db: Session, email: str, password: str, display_name: str) -> 
         status=UserStatus.PENDING,
     )
     db.add(user)
-    db.commit()
+    db.flush()
     db.refresh(user)
     return user
 
@@ -71,7 +71,7 @@ def create_tokens(db: Session, user: User) -> tuple[str, str]:
     """Issue an access token and a stored (hashed) refresh token."""
     refresh_token, expires_at = new_refresh_token()
     db.add(RefreshToken(user_id=user.id, token_hash=hash_refresh_token(refresh_token), expires_at=expires_at))
-    db.commit()
+    db.flush()
     return create_access_token(user.id), refresh_token
 
 
@@ -91,7 +91,7 @@ def revoke_refresh_token(db: Session, refresh_token: str) -> bool:
     if stored is None:
         return False
     stored.revoked = True
-    db.commit()
+    db.flush()
     return True
 
 
@@ -107,6 +107,6 @@ def update_user_access(db: Session, user: User, status: UserStatus | None, role:
             # Sign the user out everywhere.
             for token in user.refresh_tokens:
                 token.revoked = True
-    db.commit()
+    db.flush()
     db.refresh(user)
     return user

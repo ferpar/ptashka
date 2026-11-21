@@ -22,7 +22,7 @@ def list_comments(db: Session, card: Card) -> list[Comment]:
 def add_comment(db: Session, card: Card, author: User, body: str) -> Comment:
     comment = Comment(card_id=card.id, author_id=author.id, body=body)
     db.add(comment)
-    db.commit()
+    db.flush()
     db.refresh(comment)
     return comment
 
@@ -31,11 +31,11 @@ def edit_comment(db: Session, comment: Comment, body: str) -> Comment:
     if body != comment.body:  # Re-saving the same text isn't an edit.
         comment.body = body
         comment.edited_at = datetime.now(timezone.utc)
-        db.commit()
+        db.flush()
         db.refresh(comment)
     return comment
 
 
 def delete_comment(db: Session, comment: Comment) -> None:
     db.delete(comment)
-    db.commit()
+    db.flush()

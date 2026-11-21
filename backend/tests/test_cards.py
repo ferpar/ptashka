@@ -203,11 +203,12 @@ def _fill(client, make_user, owner, board_id, lists, cards_per_list, members, ta
 
 
 def _queries_to_load_board(client, db_session, count_queries, user, board_id):
+    headers = auth_headers(user)  # Read user.id while it's still attached to the session.
     # Tests share one session across requests; in production each request gets a fresh one.
     # Empty the identity map so nothing is served from a previous request's cache.
     db_session.expunge_all()
     count_queries.clear()
-    assert client.get(f"/api/boards/{board_id}", headers=auth_headers(user)).status_code == 200
+    assert client.get(f"/api/boards/{board_id}", headers=headers).status_code == 200
     return len(count_queries)
 
 

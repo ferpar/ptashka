@@ -1,11 +1,10 @@
 """Card endpoints addressed by card id (creating a card lives under /api/lists/{id}/cards)."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.orm import Session
 
 from ptashka.api.presenters import card_detail
 from ptashka.auth.board_access import CardAccess, card_access, check_fields
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import BoardRole
 from ptashka.models.schemas import (
     CardDetail,
@@ -26,15 +25,15 @@ NO_CONTENT = Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{card_id}", response_model=CardDetail)
-def get_card(access: CardAccess = Depends(card_access(BoardRole.VIEWER)), db: Session = Depends(get_db)) -> CardDetail:
+def get_card(db: DbSession, access: CardAccess = Depends(card_access(BoardRole.VIEWER))) -> CardDetail:
     return card_detail(db, access.card)
 
 
 @router.patch("/{card_id}", response_model=CardDetail)
 def update_card(
+    db: DbSession,
     request: CardUpdateRequest,
     access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
-    db: Session = Depends(get_db),
 ) -> CardDetail:
     """Edit fields. `completed` / `archived` take booleans; `description` / `due_at` can be cleared with null.
 
@@ -55,9 +54,9 @@ def update_card(
 
 @router.post("/{card_id}/move", response_model=CardDetail)
 def move_card(
+    db: DbSession,
     request: CardMoveRequest,
     access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
-    db: Session = Depends(get_db),
 ) -> CardDetail:
     """Move within a list or to another list on the same board (contributors and up)."""
     try:
@@ -69,7 +68,8 @@ def move_card(
 
 @router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_card(
-    access: CardAccess = Depends(card_access(BoardRole.EDITOR)), db: Session = Depends(get_db)
+    db: DbSession,
+    access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
     """Delete permanently. Prefer archiving (`PATCH {"archived": true}`)."""
     card_service.delete_card(db, access.card)
@@ -83,7 +83,8 @@ def delete_card(
 
 @router.put("/{card_id}/labels/{label_id}", status_code=status.HTTP_204_NO_CONTENT)
 def add_label(
-    label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR)), db: Session = Depends(get_db)
+    db: DbSession,
+    label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
     try:
         label_service.attach(db, access.card, label_id)
@@ -94,7 +95,8 @@ def add_label(
 
 @router.delete("/{card_id}/labels/{label_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_label(
-    label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR)), db: Session = Depends(get_db)
+    db: DbSession,
+    label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
     label_service.detach(db, access.card, label_id)
     return NO_CONTENT
@@ -108,7 +110,8 @@ def _check_self_or_editor(access: CardAccess, user_id: int) -> None:
 
 @router.put("/{card_id}/assignees/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def assign(
-    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)), db: Session = Depends(get_db)
+    db: DbSession,
+    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR))
 ) -> Response:
     """Assign a board member (any role) to the card. Contributors may only assign themselves."""
     _check_self_or_editor(access, user_id)
@@ -121,7 +124,8 @@ def assign(
 
 @router.delete("/{card_id}/assignees/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def unassign(
-    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)), db: Session = Depends(get_db)
+    db: DbSession,
+    user_id: int, access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR))
 ) -> Response:
     """Contributors may only unassign themselves."""
     _check_self_or_editor(access, user_id)
@@ -134,9 +138,9 @@ def unassign(
 
 @router.post("/{card_id}/checklist", response_model=ChecklistItemSchema, status_code=status.HTTP_201_CREATED)
 def add_checklist_item(
+    db: DbSession,
     request: ChecklistItemCreateRequest,
     access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> ChecklistItemSchema:
     """Add an item at the end of the card's checklist."""
     return ChecklistItemSchema.model_validate(checklist_service.add_item(db, access.card, request.text))
@@ -144,7 +148,8 @@ def add_checklist_item(
 
 @router.get("/{card_id}/comments", response_model=CommentListResponse)
 def list_comments(
-    access: CardAccess = Depends(card_access(BoardRole.VIEWER)), db: Session = Depends(get_db)
+    db: DbSession,
+    access: CardAccess = Depends(card_access(BoardRole.VIEWER))
 ) -> CommentListResponse:
     """Oldest first."""
     comments = comment_service.list_comments(db, access.card)
@@ -153,9 +158,9 @@ def list_comments(
 
 @router.post("/{card_id}/comments", response_model=CommentSchema, status_code=status.HTTP_201_CREATED)
 def add_comment(
+    db: DbSession,
     request: CommentRequest,
     access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
-    db: Session = Depends(get_db),
 ) -> CommentSchema:
     comment = comment_service.add_comment(db, access.card, access.access.user, request.body)
     return CommentSchema.model_validate(comment)

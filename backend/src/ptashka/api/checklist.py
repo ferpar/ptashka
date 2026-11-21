@@ -1,10 +1,9 @@
 """Checklist item endpoints addressed by item id (adding one lives under /api/cards/{id}/checklist)."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.orm import Session
 
 from ptashka.auth.board_access import ChecklistItemAccess, check_fields, checklist_item_access
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import BoardRole
 from ptashka.models.schemas import ChecklistItemSchema, ChecklistItemUpdateRequest, MoveRequest
 from ptashka.services import checklist_service
@@ -15,9 +14,9 @@ router = APIRouter(prefix="/api/checklist-items", tags=["checklist"])
 
 @router.patch("/{item_id}", response_model=ChecklistItemSchema)
 def update_item(
+    db: DbSession,
     request: ChecklistItemUpdateRequest,
     access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.CONTRIBUTOR)),
-    db: Session = Depends(get_db),
 ) -> ChecklistItemSchema:
     """Tick (`done: true`) / untick (`done: false`) the item (contributors), or edit its text (editors)."""
     changes = request.model_dump(exclude_unset=True)
@@ -28,9 +27,9 @@ def update_item(
 
 @router.post("/{item_id}/move", response_model=ChecklistItemSchema)
 def move_item(
+    db: DbSession,
     request: MoveRequest,
     access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> ChecklistItemSchema:
     """Reorder within the card's checklist: right after `after_id`, or first when null."""
     try:
@@ -41,8 +40,8 @@ def move_item(
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_item(
+    db: DbSession,
     access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.EDITOR)),
-    db: Session = Depends(get_db),
 ) -> Response:
     checklist_service.delete_item(db, access.item)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

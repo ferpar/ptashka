@@ -9,10 +9,9 @@ from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
 
 from ptashka.auth.jwt import TokenError, decode_access_token
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import User, UserRole, UserStatus
 
 # Also adds the "Authorize" button to the /docs page.
@@ -28,8 +27,8 @@ def _unauthorized(detail: str) -> HTTPException:
 
 
 def get_current_user(
+    db: DbSession,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
 ) -> User:
     """The authenticated, *active* user. Pending or disabled accounts get a 401."""
     try:

@@ -75,7 +75,7 @@ def create_board(db: Session, creator: User, name: str, description: str | None,
         for name, position in zip(DEFAULT_LISTS, ordering.spread(len(DEFAULT_LISTS))):
             board.lists.append(BoardList(name=name, position=position, is_done=name == DONE_LIST))
     db.add(board)
-    db.commit()
+    db.flush()
     db.refresh(board)
     return board
 
@@ -131,7 +131,7 @@ def add_member(db: Session, board: Board, email: str, role: BoardRole) -> BoardM
         raise AlreadyMemberError("User is already a member of this board")
     member = BoardMember(board_id=board.id, user_id=user.id, role=role)
     db.add(member)
-    db.commit()
+    db.flush()
     db.refresh(member)
     return member
 
@@ -140,7 +140,7 @@ def change_member_role(db: Session, member: BoardMember, role: BoardRole) -> Boa
     if member.role == BoardRole.OWNER and role != BoardRole.OWNER and _owner_count(db, member.board_id) == 1:
         raise LastOwnerError("A board needs at least one owner")
     member.role = role
-    db.commit()
+    db.flush()
     db.refresh(member)
     return member
 
@@ -149,7 +149,7 @@ def remove_member(db: Session, member: BoardMember) -> None:
     if member.role == BoardRole.OWNER and _owner_count(db, member.board_id) == 1:
         raise LastOwnerError("A board needs at least one owner")
     db.delete(member)
-    db.commit()
+    db.flush()
 
 
 # ── Lists ──
@@ -169,7 +169,7 @@ def create_list(db: Session, board: Board, name: str) -> BoardList:
     siblings = _ordered_lists(db, board.id)
     board_list = BoardList(board_id=board.id, name=name.strip(), position=ordering.place(siblings, len(siblings)))
     db.add(board_list)
-    db.commit()
+    db.flush()
     db.refresh(board_list)
     return board_list
 
@@ -186,6 +186,6 @@ def move_list(db: Session, board_list: BoardList, after_id: int | None) -> Board
         # Also covers a list on another board: you can't reference what isn't here.
         raise InvalidMoveError("after_id is not a list on this board")
     board_list.position = ordering.place(siblings, index)
-    db.commit()
+    db.flush()
     db.refresh(board_list)
     return board_list

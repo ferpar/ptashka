@@ -23,7 +23,7 @@ def add_item(db: Session, card: Card, text: str) -> ChecklistItem:
     siblings = _ordered_items(db, card.id)
     item = ChecklistItem(card_id=card.id, text=text.strip(), position=ordering.place(siblings, len(siblings)))
     db.add(item)
-    db.commit()
+    db.flush()
     db.refresh(item)
     return item
 
@@ -33,7 +33,7 @@ def update_item(db: Session, item: ChecklistItem, changes: dict[str, Any]) -> Ch
         item.text = changes["text"].strip()
     if changes.get("done") is not None:
         item.done_at = toggled_timestamp(item.done_at, changes["done"])
-    db.commit()
+    db.flush()
     db.refresh(item)
     return item
 
@@ -49,11 +49,11 @@ def move_item(db: Session, item: ChecklistItem, after_id: int | None) -> Checkli
     except ValueError:
         raise InvalidMoveError("after_id is not an item on this card's checklist")
     item.position = ordering.place(siblings, index)
-    db.commit()
+    db.flush()
     db.refresh(item)
     return item
 
 
 def delete_item(db: Session, item: ChecklistItem) -> None:
     db.delete(item)
-    db.commit()
+    db.flush()

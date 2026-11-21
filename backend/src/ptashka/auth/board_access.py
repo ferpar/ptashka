@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ptashka.auth.dependencies import get_current_user
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, ChecklistItem, Comment, Label, User
 
 
@@ -95,9 +95,9 @@ def board_access(minimum: BoardRole) -> Callable[..., BoardAccess]:
     """Dependency for routes with a `{board_id}` path parameter."""
 
     def dependency(
+        db: DbSession,
         board_id: int,  # FastAPI fills this from the path, just like in an endpoint.
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> BoardAccess:
         return _check(db, user, board_id, minimum)
 
@@ -123,9 +123,9 @@ def list_access(minimum: BoardRole) -> Callable[..., ListAccess]:
     """Dependency for routes with a `{list_id}` path parameter: find the list, then check its board."""
 
     def dependency(
+        db: DbSession,
         list_id: int,
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> ListAccess:
         board_list = db.get(BoardList, list_id)
         access = _check_child(db, user, board_list.board_id if board_list else None, minimum, "List")
@@ -139,9 +139,9 @@ def card_access(minimum: BoardRole) -> Callable[..., CardAccess]:
     """Dependency for routes with a `{card_id}` path parameter."""
 
     def dependency(
+        db: DbSession,
         card_id: int,
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> CardAccess:
         card = db.get(Card, card_id)
         access = _check_child(db, user, card.board_id if card else None, minimum, "Card")
@@ -155,9 +155,9 @@ def label_access(minimum: BoardRole) -> Callable[..., LabelAccess]:
     """Dependency for routes with a `{label_id}` path parameter."""
 
     def dependency(
+        db: DbSession,
         label_id: int,
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> LabelAccess:
         label = db.get(Label, label_id)
         access = _check_child(db, user, label.board_id if label else None, minimum, "Label")
@@ -171,9 +171,9 @@ def checklist_item_access(minimum: BoardRole) -> Callable[..., ChecklistItemAcce
     """Dependency for routes with an `{item_id}` path parameter. Items reach their board via the card."""
 
     def dependency(
+        db: DbSession,
         item_id: int,
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> ChecklistItemAccess:
         item = db.get(ChecklistItem, item_id)
         access = _check_child(db, user, item.card.board_id if item else None, minimum, "Checklist item")
@@ -187,9 +187,9 @@ def comment_access(minimum: BoardRole) -> Callable[..., CommentAccess]:
     """Dependency for routes with a `{comment_id}` path parameter."""
 
     def dependency(
+        db: DbSession,
         comment_id: int,
         user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
     ) -> CommentAccess:
         comment = db.get(Comment, comment_id)
         board_id = db.scalar(select(Card.board_id).where(Card.id == comment.card_id)) if comment else None

@@ -2,10 +2,9 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from ptashka.auth.dependencies import require_admin
-from ptashka.db.database import get_db
+from ptashka.db.database import DbSession
 from ptashka.models.db import User, UserStatus
 from ptashka.models.schemas import AdminUserUpdateRequest, UserListResponse, UserSchema
 from ptashka.services import auth_service
@@ -15,10 +14,10 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.get("/users", response_model=UserListResponse)
 def list_users(
+    db: DbSession,
     # `alias` keeps the URL as ?status=pending without shadowing fastapi's `status` module.
     status_filter: UserStatus | None = Query(default=None, alias="status"),
     _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ) -> UserListResponse:
     stmt = select(User).order_by(User.created_at.desc())
     if status_filter is not None:
@@ -28,10 +27,10 @@ def list_users(
 
 @router.patch("/users/{user_id}", response_model=UserSchema)
 def update_user(
+    db: DbSession,
     user_id: int,
     request: AdminUserUpdateRequest,
     admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ) -> User:
     """Approve (`status: active`), disable, or change the role of an account."""
     user = db.get(User, user_id)
