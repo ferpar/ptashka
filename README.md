@@ -60,3 +60,6 @@ comment and take cards, but not edit or delete them), and create an API token fo
 *API tokens* page or with
 `python -m ptashka.cli.create_token --email agent@example.com --name "Research agent" --scope write`.
 Useful endpoints: `GET /api/cards?assignee=me&completed=false` and `GET /api/activity?since=<id>`.
+
+For MCP clients (Claude Code, Claude Desktop…), `mcp-server/` exposes all of this as tools; see
+[mcp-server/README.md](mcp-server/README.md) for the setup.

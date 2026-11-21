@@ -90,6 +90,22 @@ jobs:
             exit 1
           fi
 
+  mcp-server:
+    name: MCP server (types, tools end to end against the backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0  # Exact version: this action publishes no floating major tags since v8.
+      - name: Install
+        run: uv venv --python 3.13 && uv pip install -e ../backend -e ".[dev]"
+      - name: Type check
+        run: .venv/bin/pyright
+      - name: Tests
+        run: .venv/bin/pytest -q
+
   docker:
     name: Images build
     runs-on: ubuntu-latest
