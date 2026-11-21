@@ -9,7 +9,7 @@ from datetime import datetime
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, EmailStr, Field
 
-from ptashka.models.db import BoardRole, UserRole, UserStatus
+from ptashka.models.db import BoardRole, LabelColor, UserRole, UserStatus
 
 # ── Auth ──
 
@@ -153,7 +153,18 @@ class MemberSchema(BaseModel):
     added_at: datetime
 
 
-class CardSchema(BaseModel):
+class LabelSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    board_id: int
+    name: str
+    color: LabelColor
+
+
+class CardBase(BaseModel):
+    """The fields read straight off a Card row (and its label/assignee links)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -170,6 +181,36 @@ class CardSchema(BaseModel):
     created_by_id: int | None
     created_at: datetime
     updated_at: datetime
+    label_ids: list[int]  # Look them up in the board's `labels`.
+    assignee_ids: list[int]  # User ids; look them up in the board's `members`.
+
+
+class CardSchema(CardBase):
+    """A card as shown on the board: base fields plus counts computed with aggregate queries.
+
+    The counts have no defaults on purpose: forgetting to compute them is an error, not a silent 0.
+    """
+
+    checklist_done: int
+    checklist_total: int
+    comment_count: int
+
+
+class ChecklistItemSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    card_id: int
+    text: str
+    position: float
+    done_at: datetime | None
+
+
+class CardDetail(CardSchema):
+    """A single card, as returned by the card endpoints: includes its checklist.
+    (Comments are listed separately: they can grow long.)"""
+
+    checklist: list[ChecklistItemSchema]
 
 
 class ListWithCards(ListSchema):
@@ -181,6 +222,7 @@ class BoardDetail(BoardSummary):
 
     lists: list[ListWithCards]
     members: list[MemberSchema]
+    labels: list[LabelSchema]
 
 
 class MemberAddRequest(BaseModel):
@@ -241,3 +283,48 @@ class CardMoveRequest(MoveRequest):
     """Move a card to `list_id` (the same list to reorder), right after card `after_id` (null = top)."""
 
     list_id: int
+
+
+# ── Card details ──
+
+
+class LabelCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    color: LabelColor
+
+
+class LabelUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    color: LabelColor | None = None
+
+
+class LabelListResponse(BaseModel):
+    labels: list[LabelSchema]
+
+
+class ChecklistItemCreateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+class ChecklistItemUpdateRequest(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=500)
+    done: bool | None = None
+
+
+class CommentSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    card_id: int
+    author: UserPublic | None  # None if the author's account was deleted.
+    body: str
+    created_at: datetime
+    edited_at: datetime | None
+
+
+class CommentListResponse(BaseModel):
+    comments: list[CommentSchema]
+
+
+class CommentRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=10000)

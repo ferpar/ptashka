@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, User, UserStatus
+from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User, UserStatus
 from ptashka.services import locks, ordering
 from ptashka.services.auth_service import normalize_email
 
@@ -56,8 +56,12 @@ def load_board_tree(db: Session, board_id: int) -> Board:
         select(Board)
         .where(Board.id == board_id)
         .options(
-            selectinload(Board.lists).selectinload(BoardList.cards),
+            # One query per relationship level, however many lists/cards/links there are.
+            selectinload(Board.lists)
+            .selectinload(BoardList.cards)
+            .options(selectinload(Card.label_links), selectinload(Card.assignee_links)),
             selectinload(Board.members).joinedload(BoardMember.user),
+            selectinload(Board.labels),
         )
     )
     return db.scalars(stmt).one()

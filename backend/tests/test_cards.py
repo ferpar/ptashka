@@ -181,13 +181,25 @@ def test_card_permissions(client, make_user, user):
 # ── Performance ──
 
 
-def _fill(client, make_user, owner, board_id, lists, cards_per_list, members):
+def _fill(client, make_user, owner, board_id, lists, cards_per_list, members, tag):
+    """Add lists of cards, each card with a label, an assignee, a checklist item and a comment."""
+    h = auth_headers(owner)
+    users = [make_user(email=f"{tag}{i}@example.com") for i in range(members)]
+    for u in users:
+        add_member(client, owner, board_id, u.email)
+    labels = [
+        client.post(f"/api/boards/{board_id}/labels", json={"name": f"{tag}{i}", "color": "red"}, headers=h).json()
+        for i in range(members)
+    ]
     for i in range(lists):
-        lst = client.post(f"/api/boards/{board_id}/lists", json={"name": f"L{i}"}, headers=auth_headers(owner)).json()
+        lst = client.post(f"/api/boards/{board_id}/lists", json={"name": f"{tag}{i}"}, headers=h).json()
         for j in range(cards_per_list):
-            add_card(client, owner, lst["id"], f"card {i}-{j}")
-    for i in range(members):
-        add_member(client, owner, board_id, make_user(email=f"member{i}@example.com").email)
+            card = add_card(client, owner, lst["id"], f"{tag} {i}-{j}")
+            k = (i + j) % members
+            client.put(f"/api/cards/{card['id']}/labels/{labels[k]['id']}", headers=h)
+            client.put(f"/api/cards/{card['id']}/assignees/{users[k].id}", headers=h)
+            client.post(f"/api/cards/{card['id']}/checklist", json={"text": "step"}, headers=h)
+            client.post(f"/api/cards/{card['id']}/comments", json={"body": "note"}, headers=h)
 
 
 def _queries_to_load_board(client, db_session, count_queries, user, board_id):
@@ -200,12 +212,17 @@ def _queries_to_load_board(client, db_session, count_queries, user, board_id):
 
 
 def test_board_detail_query_count_does_not_grow_with_board_size(client, db_session, make_user, user, count_queries):
-    """The N+1 guard: loading a board must take the same number of queries whether it has
-    3 lists or 13, 0 cards or 50, 1 member or 6."""
+    """The N+1 guard: loading a board takes the same number of queries with one of everything
+    as with many (4 vs 54 lists... 1 vs 50 cards, each with labels, assignees, checklists, comments).
+
+    It starts from "one of everything", not an empty board, because SQLAlchemy skips a selectinload
+    query when there are no parent rows: an empty board legitimately needs fewer queries.
+    """
     board = create_board(client, user)
+    _fill(client, make_user, user, board["id"], lists=1, cards_per_list=1, members=1, tag="a")
     small = _queries_to_load_board(client, db_session, count_queries, user, board["id"])
 
-    _fill(client, make_user, user, board["id"], lists=10, cards_per_list=5, members=5)
+    _fill(client, make_user, user, board["id"], lists=10, cards_per_list=5, members=5, tag="b")
     large = _queries_to_load_board(client, db_session, count_queries, user, board["id"])
 
-    assert large == small, f"{small} queries for an empty board, {large} for a full one"
+    assert large == small, f"{small} queries with one of everything, {large} with many"

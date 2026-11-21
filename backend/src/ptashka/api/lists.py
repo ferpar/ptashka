@@ -3,10 +3,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ptashka.api.presenters import card_detail
 from ptashka.auth.board_access import ListAccess, list_access
 from ptashka.db.database import get_db
-from ptashka.models.db import BoardList, BoardRole, Card
-from ptashka.models.schemas import CardCreateRequest, CardSchema, ListSchema, ListUpdateRequest, MoveRequest
+from ptashka.models.db import BoardList, BoardRole
+from ptashka.models.schemas import CardCreateRequest, CardDetail, ListSchema, ListUpdateRequest, MoveRequest
 from ptashka.services import board_service, card_service
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
@@ -45,16 +46,17 @@ def move_list(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
 
-@router.post("/{list_id}/cards", response_model=CardSchema, status_code=status.HTTP_201_CREATED)
+@router.post("/{list_id}/cards", response_model=CardDetail, status_code=status.HTTP_201_CREATED)
 def create_card(
     request: CardCreateRequest,
     access: ListAccess = Depends(list_access(BoardRole.EDITOR)),
     db: Session = Depends(get_db),
-) -> Card:
+) -> CardDetail:
     """Add a card at the bottom of the list."""
     try:
-        return card_service.create_card(
+        card = card_service.create_card(
             db, access.board_list, access.access.user, request.title, request.description, request.due_at
         )
     except board_service.InvalidMoveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
+    return card_detail(db, card)

@@ -13,7 +13,9 @@ from ptashka.models.schemas import (
     BoardListResponse,
     BoardSummary,
     BoardUpdateRequest,
-    CardSchema,
+    LabelCreateRequest,
+    LabelListResponse,
+    LabelSchema,
     ListCreateRequest,
     ListSchema,
     ListWithCards,
@@ -22,7 +24,8 @@ from ptashka.models.schemas import (
     MemberSchema,
     MemberUpdateRequest,
 )
-from ptashka.services import board_service
+from ptashka.api.presenters import card_schema
+from ptashka.services import board_service, card_service, label_service
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
 
@@ -40,6 +43,7 @@ def _summary(board: Board, role: BoardRole) -> BoardSummary:
 
 def _detail(db: Session, access: BoardAccess, include_archived: bool) -> BoardDetail:
     board = board_service.load_board_tree(db, access.board.id)
+    stats = card_service.stats_for_board(db, board.id)
 
     def visible(item: BoardList | Card) -> bool:
         return include_archived or item.archived_at is None
@@ -47,7 +51,7 @@ def _detail(db: Session, access: BoardAccess, include_archived: bool) -> BoardDe
     lists = [
         ListWithCards(
             **ListSchema.model_validate(lst).model_dump(),
-            cards=[CardSchema.model_validate(c) for c in lst.cards if visible(c)],
+            cards=[card_schema(c, stats[c.id]) for c in lst.cards if visible(c)],
         )
         for lst in board.lists
         if visible(lst)
@@ -57,6 +61,7 @@ def _detail(db: Session, access: BoardAccess, include_archived: bool) -> BoardDe
         **_summary(board, access.role).model_dump(),
         lists=lists,
         members=[MemberSchema.model_validate(m) for m in members],
+        labels=[LabelSchema.model_validate(label) for label in board.labels],
     )
 
 
@@ -197,3 +202,27 @@ def create_list(
 ) -> ListSchema:
     """Add a list at the end of the board."""
     return ListSchema.model_validate(board_service.create_list(db, access.board, request.name))
+
+
+# ── Labels on a board ──
+
+
+@router.get("/{board_id}/labels", response_model=LabelListResponse)
+def list_labels(
+    access: BoardAccess = Depends(board_access(BoardRole.VIEWER)), db: Session = Depends(get_db)
+) -> LabelListResponse:
+    labels = label_service.labels_for_board(db, access.board.id)
+    return LabelListResponse(labels=[LabelSchema.model_validate(label) for label in labels])
+
+
+@router.post("/{board_id}/labels", response_model=LabelSchema, status_code=status.HTTP_201_CREATED)
+def create_label(
+    request: LabelCreateRequest,
+    access: BoardAccess = Depends(board_access(BoardRole.EDITOR)),
+    db: Session = Depends(get_db),
+) -> LabelSchema:
+    try:
+        label = label_service.create_label(db, access.board, request.name, request.color)
+    except label_service.LabelExistsError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return LabelSchema.model_validate(label)

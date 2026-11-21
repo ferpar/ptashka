@@ -1,15 +1,21 @@
 """Cards: create, update, move within/between lists of a board."""
 
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
-from ptashka.models.db import BoardList, Card, User
+from ptashka.models.db import BoardList, BoardMember, Card, CardAssignee, ChecklistItem, Comment, User
 from ptashka.services import locks, ordering
 from ptashka.services.board_service import InvalidMoveError, toggled_timestamp
+
+
+class NotAMemberError(Exception):
+    pass
 
 
 class VersionConflictError(Exception):
@@ -129,3 +135,69 @@ def move_card(db: Session, card: Card, list_id: int, after_id: int | None) -> Ca
 def delete_card(db: Session, card: Card) -> None:
     db.delete(card)
     db.commit()
+
+
+# ── Assignees: PUT/DELETE semantics, so both are idempotent ──
+
+
+def assign(db: Session, card: Card, user_id: int) -> None:
+    # Like labels: the composite foreign key to board_members is the real guarantee; this check
+    # turns its IntegrityError into a clear message.
+    if db.get(BoardMember, (card.board_id, user_id)) is None:
+        raise NotAMemberError("Only members of the board can be assigned")
+    if db.get(CardAssignee, (card.id, user_id)) is None:
+        db.add(CardAssignee(card_id=card.id, user_id=user_id, board_id=card.board_id))
+        db.commit()
+
+
+def unassign(db: Session, card: Card, user_id: int) -> None:
+    link = db.get(CardAssignee, (card.id, user_id))
+    if link is not None:
+        db.delete(link)
+        db.commit()
+
+
+# ── Counts shown on cards ──
+
+
+@dataclass
+class CardStats:
+    checklist_done: int = 0
+    checklist_total: int = 0
+    comment_count: int = 0
+
+
+def _stats(db: Session, which_cards: ColumnElement[bool]) -> defaultdict[int, CardStats]:
+    """Checklist and comment counts for many cards in two queries, with the counting done by the
+    database (GROUP BY) instead of loading every item and comment into Python.
+
+    COUNT(done_at) counts non-null values only, i.e. the done items.
+    """
+    stats: defaultdict[int, CardStats] = defaultdict(CardStats)
+    checklist = (
+        select(ChecklistItem.card_id, func.count(), func.count(ChecklistItem.done_at))
+        .join(Card, Card.id == ChecklistItem.card_id)
+        .where(which_cards)
+        .group_by(ChecklistItem.card_id)
+    )
+    for card_id, total, done in db.execute(checklist):
+        stats[card_id].checklist_total = total
+        stats[card_id].checklist_done = done
+    comments = (
+        select(Comment.card_id, func.count())
+        .join(Card, Card.id == Comment.card_id)
+        .where(which_cards)
+        .group_by(Comment.card_id)
+    )
+    for card_id, count in db.execute(comments):
+        stats[card_id].comment_count = count
+    return stats  # A defaultdict: cards with no items/comments get CardStats() (all zeros).
+
+
+def stats_for_board(db: Session, board_id: int) -> defaultdict[int, CardStats]:
+    # Card.board_id (denormalized in phase 3) makes this a simple filter, not a join through lists.
+    return _stats(db, Card.board_id == board_id)
+
+
+def stats_for_card(db: Session, card_id: int) -> CardStats:
+    return _stats(db, Card.id == card_id)[card_id]

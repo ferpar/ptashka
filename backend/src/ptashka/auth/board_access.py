@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import get_db
-from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
+from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, ChecklistItem, Comment, Label, User
 
 
 @dataclass
@@ -42,6 +42,24 @@ class ListAccess:
 @dataclass
 class CardAccess:
     card: Card
+    access: BoardAccess
+
+
+@dataclass
+class LabelAccess:
+    label: Label
+    access: BoardAccess
+
+
+@dataclass
+class ChecklistItemAccess:
+    item: ChecklistItem
+    access: BoardAccess
+
+
+@dataclass
+class CommentAccess:
+    comment: Comment
     access: BoardAccess
 
 
@@ -72,14 +90,15 @@ def board_access(minimum: BoardRole) -> Callable[..., BoardAccess]:
     return dependency
 
 
-def _check_child(db: Session, user: User, item: BoardList | Card | None, minimum: BoardRole, name: str) -> BoardAccess:
-    """Access to something that lives on a board. A missing item and an item on a board you can't
-    see give the *same* 404, so nobody can tell whether an id exists on someone else's board."""
+def _check_child(db: Session, user: User, board_id: int | None, minimum: BoardRole, name: str) -> BoardAccess:
+    """Access to something that lives on board `board_id` (None: the thing doesn't exist).
+    A missing item and an item on a board you can't see give the *same* 404, so nobody can
+    tell whether an id exists on someone else's board."""
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{name} not found")
-    if item is None:
+    if board_id is None:
         raise not_found
     try:
-        return _check(db, user, item.board_id, minimum)
+        return _check(db, user, board_id, minimum)
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND:
             raise not_found
@@ -95,7 +114,7 @@ def list_access(minimum: BoardRole) -> Callable[..., ListAccess]:
         db: Session = Depends(get_db),
     ) -> ListAccess:
         board_list = db.get(BoardList, list_id)
-        access = _check_child(db, user, board_list, minimum, "List")
+        access = _check_child(db, user, board_list.board_id if board_list else None, minimum, "List")
         assert board_list is not None  # _check_child raised otherwise; this tells the type checker.
         return ListAccess(board_list=board_list, access=access)
 
@@ -111,8 +130,57 @@ def card_access(minimum: BoardRole) -> Callable[..., CardAccess]:
         db: Session = Depends(get_db),
     ) -> CardAccess:
         card = db.get(Card, card_id)
-        access = _check_child(db, user, card, minimum, "Card")
+        access = _check_child(db, user, card.board_id if card else None, minimum, "Card")
         assert card is not None
         return CardAccess(card=card, access=access)
+
+    return dependency
+
+
+def label_access(minimum: BoardRole) -> Callable[..., LabelAccess]:
+    """Dependency for routes with a `{label_id}` path parameter."""
+
+    def dependency(
+        label_id: int,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> LabelAccess:
+        label = db.get(Label, label_id)
+        access = _check_child(db, user, label.board_id if label else None, minimum, "Label")
+        assert label is not None
+        return LabelAccess(label=label, access=access)
+
+    return dependency
+
+
+def checklist_item_access(minimum: BoardRole) -> Callable[..., ChecklistItemAccess]:
+    """Dependency for routes with an `{item_id}` path parameter. Items reach their board via the card."""
+
+    def dependency(
+        item_id: int,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> ChecklistItemAccess:
+        item = db.get(ChecklistItem, item_id)
+        access = _check_child(db, user, item.card.board_id if item else None, minimum, "Checklist item")
+        assert item is not None
+        return ChecklistItemAccess(item=item, access=access)
+
+    return dependency
+
+
+def comment_access(minimum: BoardRole) -> Callable[..., CommentAccess]:
+    """Dependency for routes with a `{comment_id}` path parameter."""
+
+    def dependency(
+        comment_id: int,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> CommentAccess:
+        comment = db.get(Comment, comment_id)
+        board_id = db.scalar(select(Card.board_id).where(Card.id == comment.card_id)) if comment else None
+        access = _check_child(db, user, board_id, minimum, "Comment")
+        assert comment is not None
+        return CommentAccess(comment=comment, access=access)
 
     return dependency

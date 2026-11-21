@@ -3,7 +3,7 @@
 The race: two requests read a list's card positions at the same time, both compute
 the same midpoint (or one renumbers while the other computes from stale numbers).
 The fix is to make writers to the *same parent* take turns: each one locks the parent
-row (the list for cards, the board for lists) with SELECT ... FOR UPDATE before reading
+row (the board for lists, the list for cards, the card for checklist items) with SELECT ... FOR UPDATE before reading
 siblings. A second request blocks on that SELECT until the first one commits, then reads
 the updated positions.
 
@@ -21,9 +21,9 @@ from typing import TypeVar
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ptashka.models.db import Board, BoardList
+from ptashka.models.db import Board, BoardList, Card
 
-Parent = TypeVar("Parent", Board, BoardList)
+Parent = TypeVar("Parent", Board, BoardList, Card)
 
 
 def lock(db: Session, model: type[Parent], id_: int) -> Parent:

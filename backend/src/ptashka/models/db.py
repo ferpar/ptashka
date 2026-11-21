@@ -4,6 +4,7 @@ Groups:
 
 - **Accounts**: User, RefreshToken.
 - **Boards**: Board, BoardMember (who can see/edit a board), BoardList (a column), Card.
+- **Card details**: Label + CardLabel, CardAssignee, ChecklistItem, Comment.
 """
 
 from datetime import datetime, timezone
@@ -147,9 +148,17 @@ class Board(Base):
     # Archived boards are hidden from the board list but keep all their data.
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
-    members: Mapped[list["BoardMember"]] = relationship(back_populates="board", cascade="all, delete-orphan")
+    # passive_deletes=True on these relationships: when a parent is deleted, let the database's
+    # ON DELETE CASCADE remove the children in one statement, instead of SQLAlchemy loading every
+    # child (and grandchild...) just to delete them one by one.
+    members: Mapped[list["BoardMember"]] = relationship(
+        back_populates="board", cascade="all, delete-orphan", passive_deletes=True
+    )
     lists: Mapped[list["BoardList"]] = relationship(
-        back_populates="board", cascade="all, delete-orphan", order_by="BoardList.position"
+        back_populates="board", cascade="all, delete-orphan", passive_deletes=True, order_by="BoardList.position"
+    )
+    labels: Mapped[list["Label"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, order_by="Label.name"
     )
 
 
@@ -202,7 +211,10 @@ class BoardList(Base):
     cards: Mapped[list["Card"]] = relationship(
         # A lambda, because Card isn't defined yet when this line runs. Ties (possible if two
         # moves race) are broken by id, so the order is always deterministic.
-        back_populates="board_list", cascade="all, delete-orphan", order_by=lambda: [Card.position, Card.id]
+        back_populates="board_list",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: [Card.position, Card.id],
     )
 
 
@@ -213,6 +225,8 @@ class Card(Base):
     __table_args__ = (
         # The board view reads "cards of list X in order": one index serves both the filter and the sort.
         Index("ix_cards_list_position", "list_id", "position"),
+        # Referenced by card_labels / card_assignees, like uq_lists_id_board is by cards.
+        UniqueConstraint("id", "board_id", name="uq_cards_id_board"),
         # The database guarantees the denormalized board_id matches the list's board: a card
         # pointing at (list 3, board 2) is rejected unless list 3 really is on board 2.
         # ON UPDATE CASCADE: if a list ever moves to another board, its cards' board_id follows.
@@ -248,3 +262,124 @@ class Card(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow)
 
     board_list: Mapped[BoardList] = relationship(back_populates="cards")
+    label_links: Mapped[list["CardLabel"]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
+    assignee_links: Mapped[list["CardAssignee"]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
+    checklist_items: Mapped[list["ChecklistItem"]] = relationship(
+        back_populates="card",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: [ChecklistItem.position, ChecklistItem.id],
+    )
+
+    # Plain Python properties: Pydantic's from_attributes reads these like columns.
+    @property
+    def label_ids(self) -> list[int]:
+        return sorted(link.label_id for link in self.label_links)
+
+    @property
+    def assignee_ids(self) -> list[int]:
+        return sorted(link.user_id for link in self.assignee_links)
+
+
+# ── Card details ──
+
+
+class LabelColor(str, PyEnum):
+    """A fixed palette: the frontend maps each name to colours that work in light and dark themes."""
+
+    GREEN = "green"
+    YELLOW = "yellow"
+    ORANGE = "orange"
+    RED = "red"
+    PURPLE = "purple"
+    BLUE = "blue"
+    SKY = "sky"
+    LIME = "lime"
+    PINK = "pink"
+    GRAY = "gray"
+
+
+class Label(Base):
+    """A board's tag ("bug", "urgent"...). Cards can only use labels from their own board."""
+
+    __tablename__ = "labels"
+    __table_args__ = (
+        UniqueConstraint("board_id", "name", name="uq_labels_board_name"),
+        UniqueConstraint("id", "board_id", name="uq_labels_id_board"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(50))
+    color: Mapped[LabelColor] = mapped_column(_enum(LabelColor))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class CardLabel(Base):
+    """Links a card to a label. board_id appears in *both* composite foreign keys, so the database
+    guarantees the card and the label are on the same board."""
+
+    __tablename__ = "card_labels"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["card_id", "board_id"], ["cards.id", "cards.board_id"], ondelete="CASCADE", onupdate="CASCADE"
+        ),
+        ForeignKeyConstraint(["label_id", "board_id"], ["labels.id", "labels.board_id"], ondelete="CASCADE"),
+    )
+
+    card_id: Mapped[int] = mapped_column(primary_key=True)
+    label_id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    board_id: Mapped[int]
+
+
+class CardAssignee(Base):
+    """Links a card to a user responsible for it. The (board_id, user_id) foreign key points at
+    board_members, so only members can be assigned, and leaving a board (deleting the membership)
+    removes that person's assignments on it automatically."""
+
+    __tablename__ = "card_assignees"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["card_id", "board_id"], ["cards.id", "cards.board_id"], ondelete="CASCADE", onupdate="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["board_id", "user_id"], ["board_members.board_id", "board_members.user_id"], ondelete="CASCADE"
+        ),
+        # Phase 5's "cards assigned to me, across boards" starts from the user.
+        Index("ix_card_assignees_user", "user_id"),
+    )
+
+    card_id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(primary_key=True)
+    board_id: Mapped[int]
+
+
+class ChecklistItem(Base):
+    """A sub-task of a card, ordered like cards are (see services/ordering.py)."""
+
+    __tablename__ = "checklist_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(String(500))
+    position: Mapped[float] = mapped_column(Float)
+    done_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    card: Mapped[Card] = relationship(back_populates="checklist_items")
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+    # The card view lists a card's comments oldest first.
+    __table_args__ = (Index("ix_comments_card_created", "card_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"))
+    # SET NULL: if the author's account is deleted, the conversation keeps its shape.
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    body: Mapped[str] = mapped_column(Text)  # Markdown.
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+    author: Mapped[User | None] = relationship()
