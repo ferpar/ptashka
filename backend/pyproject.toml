@@ -33,8 +33,3 @@ packages = ["src/ptashka"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["postgres: only meaningful on real Postgres (skipped unless TEST_POSTGRES_URL is set)"]
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-extraPaths = ["src"]
