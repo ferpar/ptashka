@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ptashka.models.db import Card, Comment, User
+from ptashka.models.db import ActivityKind, Card, Comment, User
+from ptashka.services import activity_service
 
 
 def list_comments(db: Session, card: Card) -> list[Comment]:
@@ -19,11 +20,16 @@ def list_comments(db: Session, card: Card) -> list[Comment]:
     return list(db.scalars(stmt))
 
 
-def add_comment(db: Session, card: Card, author: User, body: str) -> Comment:
-    comment = Comment(card_id=card.id, author_id=author.id, body=body)
+EXCERPT_LENGTH = 140
+
+
+def add_comment(db: Session, actor: User, card: Card, body: str) -> Comment:
+    comment = Comment(card_id=card.id, author_id=actor.id, body=body)
     db.add(comment)
     db.flush()
     db.refresh(comment)
+    excerpt = body if len(body) <= EXCERPT_LENGTH else body[: EXCERPT_LENGTH - 1] + "…"
+    activity_service.record(db, actor, ActivityKind.COMMENT_ADDED, card.board_id, card, comment_id=comment.id, excerpt=excerpt)
     return comment
 
 

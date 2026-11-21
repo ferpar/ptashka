@@ -21,7 +21,7 @@ def update_item(
     """Tick (`done: true`) / untick (`done: false`) the item (contributors), or edit its text (editors)."""
     changes = request.model_dump(exclude_unset=True)
     check_fields(access.access.role, changes, allowed={"done"}, above=BoardRole.EDITOR)
-    item = checklist_service.update_item(db, access.item, changes)
+    item = checklist_service.update_item(db, access.access.user, access.item, changes)
     return ChecklistItemSchema.model_validate(item)
 
 

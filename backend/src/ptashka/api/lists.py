@@ -19,17 +19,7 @@ def update_list(
     access: ListAccess = Depends(list_access(BoardRole.EDITOR)),
 ) -> BoardList:
     """Rename, archive/restore (`archived`), or make it the board's done list (`is_done`)."""
-    board_list = access.board_list
-    changes = request.model_dump(exclude_unset=True, exclude_none=True)
-    if "name" in changes:
-        board_list.name = changes["name"].strip()
-    if "archived" in changes:
-        board_service.set_archived(board_list, changes["archived"])
-    if "is_done" in changes:
-        board_service.set_done_list(db, board_list, changes["is_done"])
-    db.flush()
-    db.refresh(board_list)
-    return board_list
+    return board_service.update_list(db, access.access.user, access.board_list, request.model_dump(exclude_unset=True))
 
 
 @router.post("/{list_id}/move", response_model=ListSchema)
@@ -40,7 +30,7 @@ def move_list(
 ) -> BoardList:
     """Reorder: place this list right after `after_id`, or first when `after_id` is null."""
     try:
-        return board_service.move_list(db, access.board_list, request.after_id)
+        return board_service.move_list(db, access.access.user, access.board_list, request.after_id)
     except board_service.InvalidMoveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
 
@@ -54,7 +44,7 @@ def create_card(
     """Add a card at the bottom of the list."""
     try:
         card = card_service.create_card(
-            db, access.board_list, access.access.user, request.title, request.description, request.due_at
+            db, access.access.user, access.board_list, request.title, request.description, request.due_at
         )
     except board_service.InvalidMoveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))

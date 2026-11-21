@@ -1,6 +1,6 @@
 """Board endpoints: boards, members, and creating lists on a board."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from ptashka.auth.board_access import BoardAccess, board_access, check_fields
@@ -8,6 +8,7 @@ from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import DbSession
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, User
 from ptashka.models.schemas import (
+    ActivityPage,
     BoardCreateRequest,
     BoardDetail,
     BoardListResponse,
@@ -24,8 +25,9 @@ from ptashka.models.schemas import (
     MemberSchema,
     MemberUpdateRequest,
 )
+from ptashka.api.activity import Limit, page
 from ptashka.api.presenters import card_schema
-from ptashka.services import board_service, card_service, label_service
+from ptashka.services import activity_service, board_service, card_service, label_service
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
 
@@ -108,13 +110,7 @@ def update_board(
     """Rename or describe the board (editors). Archiving/restoring (`archived`) needs an owner."""
     changes = request.model_dump(exclude_unset=True)
     check_fields(access.role, changes, allowed={"name", "description"}, above=BoardRole.OWNER)
-    if changes.get("archived") is not None:
-        board_service.set_archived(access.board, changes["archived"])
-    if changes.get("name") is not None:
-        access.board.name = changes["name"].strip()
-    if "description" in changes:  # null is allowed here: it clears the description.
-        access.board.description = changes["description"]
-    db.flush()
+    board_service.update_board(db, access.user, access.board, changes)
     return _detail(db, access, include_archived=False)
 
 
@@ -153,7 +149,7 @@ def add_member(
 ) -> BoardMember:
     """Share the board with an active user, by email."""
     try:
-        return board_service.add_member(db, access.board, request.email, request.role)
+        return board_service.add_member(db, access.user, access.board, request.email, request.role)
     except board_service.UserNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except board_service.AlreadyMemberError as e:
@@ -169,7 +165,7 @@ def update_member(
 ) -> BoardMember:
     member = _get_member(db, access.board.id, user_id)
     try:
-        return board_service.change_member_role(db, member, request.role)
+        return board_service.change_member_role(db, access.user, member, request.role)
     except board_service.LastOwnerError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -185,7 +181,7 @@ def remove_member(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requires owner access")
     member = _get_member(db, access.board.id, user_id)
     try:
-        board_service.remove_member(db, member)
+        board_service.remove_member(db, access.user, member)
     except board_service.LastOwnerError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -201,7 +197,7 @@ def create_list(
     access: BoardAccess = Depends(board_access(BoardRole.EDITOR)),
 ) -> ListSchema:
     """Add a list at the end of the board."""
-    return ListSchema.model_validate(board_service.create_list(db, access.board, request.name))
+    return ListSchema.model_validate(board_service.create_list(db, access.user, access.board, request.name))
 
 
 # ── Labels on a board ──
@@ -227,3 +223,17 @@ def create_label(
     except label_service.LabelExistsError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     return LabelSchema.model_validate(label)
+
+
+# ── Activity ──
+
+
+@router.get("/{board_id}/activity", response_model=ActivityPage)
+def board_activity(
+    db: DbSession,
+    before: int | None = Query(default=None, ge=1),
+    limit: int = Limit,
+    access: BoardAccess = Depends(board_access(BoardRole.VIEWER)),
+) -> ActivityPage:
+    """The board's history, newest first."""
+    return page(lambda n: activity_service.board_page(db, access.board.id, n, before), limit)

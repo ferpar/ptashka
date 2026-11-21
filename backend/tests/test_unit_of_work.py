@@ -79,7 +79,7 @@ def test_services_compose_into_one_transaction(db_session, user):
     """The point of moving commits out of services: a caller can combine several service calls and
     decide once whether they all land. Here the caller changes its mind, and nothing remains."""
     board = board_service.create_board(db_session, user, "Draft", None, default_lists=True)
-    card_service.create_card(db_session, board.lists[0], user, "Draft card")
+    card_service.create_card(db_session, user, board.lists[0], "Draft card")
     board_id = board.id
     db_session.rollback()
 

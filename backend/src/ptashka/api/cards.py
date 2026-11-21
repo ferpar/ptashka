@@ -1,12 +1,14 @@
 """Card endpoints addressed by card id (creating a card lives under /api/lists/{id}/cards)."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from ptashka.api.activity import Limit, page
 from ptashka.api.presenters import card_detail
 from ptashka.auth.board_access import CardAccess, card_access, check_fields
 from ptashka.db.database import DbSession
 from ptashka.models.db import BoardRole
 from ptashka.models.schemas import (
+    ActivityPage,
     CardDetail,
     CardMoveRequest,
     CardUpdateRequest,
@@ -16,7 +18,7 @@ from ptashka.models.schemas import (
     CommentRequest,
     CommentSchema,
 )
-from ptashka.services import card_service, checklist_service, comment_service, label_service
+from ptashka.services import activity_service, card_service, checklist_service, comment_service, label_service
 from ptashka.services.board_service import InvalidMoveError
 
 router = APIRouter(prefix="/api/cards", tags=["cards"])
@@ -43,7 +45,7 @@ def update_card(
     changes = request.model_dump(exclude_unset=True)
     check_fields(access.access.role, changes, allowed={"completed", "version"}, above=BoardRole.EDITOR)
     try:
-        card = card_service.update_card(db, access.card, changes)
+        card = card_service.update_card(db, access.access.user, access.card, changes)
     except card_service.VersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,7 +62,7 @@ def move_card(
 ) -> CardDetail:
     """Move within a list or to another list on the same board (contributors and up)."""
     try:
-        card = card_service.move_card(db, access.card, request.list_id, request.after_id)
+        card = card_service.move_card(db, access.access.user, access.card, request.list_id, request.after_id)
     except InvalidMoveError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     return card_detail(db, card)
@@ -72,7 +74,7 @@ def delete_card(
     access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
     """Delete permanently. Prefer archiving (`PATCH {"archived": true}`)."""
-    card_service.delete_card(db, access.card)
+    card_service.delete_card(db, access.access.user, access.card)
     return NO_CONTENT
 
 
@@ -87,7 +89,7 @@ def add_label(
     label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
     try:
-        label_service.attach(db, access.card, label_id)
+        label_service.attach(db, access.access.user, access.card, label_id)
     except label_service.LabelNotOnBoardError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     return NO_CONTENT
@@ -98,7 +100,7 @@ def remove_label(
     db: DbSession,
     label_id: int, access: CardAccess = Depends(card_access(BoardRole.EDITOR))
 ) -> Response:
-    label_service.detach(db, access.card, label_id)
+    label_service.detach(db, access.access.user, access.card, label_id)
     return NO_CONTENT
 
 
@@ -116,7 +118,7 @@ def assign(
     """Assign a board member (any role) to the card. Contributors may only assign themselves."""
     _check_self_or_editor(access, user_id)
     try:
-        card_service.assign(db, access.card, user_id)
+        card_service.assign(db, access.access.user, access.card, user_id)
     except card_service.NotAMemberError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     return NO_CONTENT
@@ -129,7 +131,7 @@ def unassign(
 ) -> Response:
     """Contributors may only unassign themselves."""
     _check_self_or_editor(access, user_id)
-    card_service.unassign(db, access.card, user_id)
+    card_service.unassign(db, access.access.user, access.card, user_id)
     return NO_CONTENT
 
 
@@ -143,7 +145,7 @@ def add_checklist_item(
     access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
 ) -> ChecklistItemSchema:
     """Add an item at the end of the card's checklist."""
-    return ChecklistItemSchema.model_validate(checklist_service.add_item(db, access.card, request.text))
+    return ChecklistItemSchema.model_validate(checklist_service.add_item(db, access.access.user, access.card, request.text))
 
 
 @router.get("/{card_id}/comments", response_model=CommentListResponse)
@@ -162,5 +164,16 @@ def add_comment(
     request: CommentRequest,
     access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
 ) -> CommentSchema:
-    comment = comment_service.add_comment(db, access.card, access.access.user, request.body)
+    comment = comment_service.add_comment(db, access.access.user, access.card, request.body)
     return CommentSchema.model_validate(comment)
+
+
+@router.get("/{card_id}/activity", response_model=ActivityPage)
+def card_activity(
+    db: DbSession,
+    before: int | None = Query(default=None, ge=1),
+    limit: int = Limit,
+    access: CardAccess = Depends(card_access(BoardRole.VIEWER)),
+) -> ActivityPage:
+    """This card's history, newest first."""
+    return page(lambda n: activity_service.card_page(db, access.card.id, n, before), limit)

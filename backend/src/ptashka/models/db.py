@@ -5,6 +5,7 @@ Groups:
 - **Accounts**: User, RefreshToken, ApiToken.
 - **Boards**: Board, BoardMember (who can see/edit a board), BoardList (a column), Card.
 - **Card details**: Label + CardLabel, CardAssignee, ChecklistItem, Comment.
+- **Activity**: an append-only log of what happened on each board.
 """
 
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from enum import Enum as PyEnum
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     Dialect,
     Enum,
@@ -63,10 +65,10 @@ class Base(DeclarativeBase):
     """Base class for all models. `Base.metadata` knows every table."""
 
 
-def _enum(cls: type[PyEnum]) -> Enum:
+def _enum(cls: type[PyEnum], length: int = 20) -> Enum:
     """Store enums by value (lowercase strings), not by member name, and as a plain
     VARCHAR rather than a native Postgres ENUM, so adding a member needs no migration."""
-    return Enum(cls, values_callable=lambda e: [m.value for m in e], native_enum=False, length=20)
+    return Enum(cls, values_callable=lambda e: [m.value for m in e], native_enum=False, length=length)
 
 
 # ── Accounts ──
@@ -414,3 +416,64 @@ class Comment(Base):
     edited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     author: Mapped[User | None] = relationship()
+
+
+# ── Activity ──
+
+
+class ActivityKind(str, PyEnum):
+    """What happened. Dotted names group by subject; details live in Activity.data."""
+
+    BOARD_CREATED = "board.created"
+    BOARD_UPDATED = "board.updated"
+    BOARD_ARCHIVED = "board.archived"
+    BOARD_RESTORED = "board.restored"
+    MEMBER_ADDED = "member.added"
+    MEMBER_ROLE_CHANGED = "member.role_changed"
+    MEMBER_REMOVED = "member.removed"
+    LIST_CREATED = "list.created"
+    LIST_UPDATED = "list.updated"
+    LIST_MOVED = "list.moved"
+    LIST_ARCHIVED = "list.archived"
+    LIST_RESTORED = "list.restored"
+    LIST_SET_DONE = "list.set_done"
+    CARD_CREATED = "card.created"
+    CARD_UPDATED = "card.updated"
+    CARD_MOVED = "card.moved"  # Between lists only; reordering within a list isn't news.
+    CARD_COMPLETED = "card.completed"
+    CARD_REOPENED = "card.reopened"
+    CARD_ARCHIVED = "card.archived"
+    CARD_RESTORED = "card.restored"
+    CARD_DELETED = "card.deleted"
+    LABEL_ADDED = "label.added"
+    LABEL_REMOVED = "label.removed"
+    ASSIGNEE_ADDED = "assignee.added"
+    ASSIGNEE_REMOVED = "assignee.removed"
+    CHECKLIST_ADDED = "checklist.added"
+    CHECKLIST_CHECKED = "checklist.checked"
+    CHECKLIST_UNCHECKED = "checklist.unchecked"
+    COMMENT_ADDED = "comment.added"
+
+
+class Activity(Base):
+    """One entry in a board's history. Append-only: written in the same transaction as the change it
+    describes (the request's unit of work), so a change and its record land together or not at all.
+
+    `data` keeps the names involved (card title, list names...) as they were at the time, so entries
+    still read well after things are renamed or deleted.
+    """
+
+    __tablename__ = "activities"
+    # Both feeds read "entries of these boards, by id": one index serves the filter and the order.
+    __table_args__ = (Index("ix_activities_board_id_id", "board_id", "id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"))
+    # SET NULL: deleting a card keeps its history (data holds the title).
+    card_id: Mapped[int | None] = mapped_column(ForeignKey("cards.id", ondelete="SET NULL"), index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    kind: Mapped[ActivityKind] = mapped_column(_enum(ActivityKind, length=30))
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    actor: Mapped[User | None] = relationship()

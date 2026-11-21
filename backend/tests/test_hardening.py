@@ -171,7 +171,7 @@ def test_race_between_check_and_write_is_caught(client, db_session, user):
 
     # The early check passes (1 == 1); only the UPDATE ... WHERE version = 1 can catch it.
     with pytest.raises(card_service.VersionConflictError) as conflict:
-        card_service.update_card(db_session, card, {"title": "Mine", "version": 1})
+        card_service.update_card(db_session, user, card, {"title": "Mine", "version": 1})
     assert conflict.value.current_version == 2
     db_session.expire_all()
     assert db_session.get(Card, card.id).title == "Theirs"  # Their committed write survives; ours was refused.

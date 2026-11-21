@@ -5,8 +5,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ptashka.models.db import Card, ChecklistItem
-from ptashka.services import locks, ordering
+from ptashka.models.db import ActivityKind, Card, ChecklistItem, User
+from ptashka.services import activity_service, locks, ordering
 from ptashka.services.board_service import InvalidMoveError, toggled_timestamp
 
 
@@ -17,7 +17,7 @@ def _ordered_items(db: Session, card_id: int, exclude_id: int | None = None) -> 
     return list(db.scalars(stmt))
 
 
-def add_item(db: Session, card: Card, text: str) -> ChecklistItem:
+def add_item(db: Session, actor: User, card: Card, text: str) -> ChecklistItem:
     """New items go at the end."""
     locks.lock(db, Card, card.id)
     siblings = _ordered_items(db, card.id)
@@ -25,14 +25,20 @@ def add_item(db: Session, card: Card, text: str) -> ChecklistItem:
     db.add(item)
     db.flush()
     db.refresh(item)
+    activity_service.record(db, actor, ActivityKind.CHECKLIST_ADDED, card.board_id, card, item_id=item.id, text=item.text)
     return item
 
 
-def update_item(db: Session, item: ChecklistItem, changes: dict[str, Any]) -> ChecklistItem:
+def update_item(db: Session, actor: User, item: ChecklistItem, changes: dict[str, Any]) -> ChecklistItem:
+    """Edit text and/or tick. Ticking and unticking are recorded; text edits aren't (minor)."""
     if changes.get("text") is not None:
         item.text = changes["text"].strip()
     if changes.get("done") is not None:
+        was_done = item.done_at is not None
         item.done_at = toggled_timestamp(item.done_at, changes["done"])
+        if was_done != changes["done"]:
+            kind = ActivityKind.CHECKLIST_CHECKED if changes["done"] else ActivityKind.CHECKLIST_UNCHECKED
+            activity_service.record(db, actor, kind, item.card.board_id, item.card, item_id=item.id, text=item.text)
     db.flush()
     db.refresh(item)
     return item

@@ -6,10 +6,11 @@ publishes them in the OpenAPI schema at /openapi.json.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, EmailStr, Field
 
-from ptashka.models.db import BoardRole, LabelColor, TokenScope, UserRole, UserStatus
+from ptashka.models.db import ActivityKind, BoardRole, LabelColor, TokenScope, UserRole, UserStatus
 
 # ── Auth ──
 
@@ -362,3 +363,32 @@ class ApiTokenCreated(ApiTokenSchema):
 
 class ApiTokenListResponse(BaseModel):
     tokens: list[ApiTokenSchema]
+
+
+# ── Activity ──
+
+
+class ActivitySchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    board_id: int
+    card_id: int | None  # None for board-level entries, or if the card was deleted.
+    actor: UserPublic | None  # None if the account was deleted.
+    kind: ActivityKind
+    data: dict[str, Any]  # Kind-specific details, with names as they were at the time.
+    created_at: datetime
+
+
+class ActivityPage(BaseModel):
+    """Newest first. Pass `next_before` as `?before=` for the next (older) page; null means no more."""
+
+    activities: list[ActivitySchema]
+    next_before: int | None
+
+
+class ActivityFeed(BaseModel):
+    """Oldest first. Pass `next_since` as `?since=` next time to get only what's new."""
+
+    activities: list[ActivitySchema]
+    next_since: int

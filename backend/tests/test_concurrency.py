@@ -48,10 +48,10 @@ def test_concurrent_moves_into_the_same_gap_get_distinct_positions(pg_session_fa
         db.flush()
         board = board_service.create_board(db, user, "Race", None, default_lists=True)
         todo, doing = board.lists[0], board.lists[1]
-        a = card_service.create_card(db, todo, user, "A")
-        card_service.create_card(db, todo, user, "B")
-        movers = [card_service.create_card(db, doing, user, name).id for name in ("C", "D")]
-        todo_id, a_id = todo.id, a.id
+        a = card_service.create_card(db, user, todo, "A")
+        card_service.create_card(db, user, todo, "B")
+        movers = [card_service.create_card(db, user, doing, name).id for name in ("C", "D")]
+        todo_id, a_id, user_id = todo.id, a.id, user.id
 
     # Widen the race window: pause between reading the siblings and writing the new position.
     real_place = ordering.place
@@ -68,10 +68,10 @@ def test_concurrent_moves_into_the_same_gap_get_distinct_positions(pg_session_fa
     def move(card_id: int) -> None:
         try:
             with pg_session_factory.begin() as db:  # Each "request": own session, connection, transaction.
-                card = db.get(Card, card_id)
-                assert card is not None
+                card, actor = db.get(Card, card_id), db.get(User, user_id)
+                assert card is not None and actor is not None
                 start.wait()  # Both threads call move_card at the same moment.
-                card_service.move_card(db, card, todo_id, after_id=a_id)
+                card_service.move_card(db, actor, card, todo_id, after_id=a_id)
         except BaseException as e:  # Surface thread failures in the test.
             errors.append(e)
 
