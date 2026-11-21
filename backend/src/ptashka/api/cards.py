@@ -24,8 +24,17 @@ def update_card(
     access: CardAccess = Depends(card_access(BoardRole.EDITOR)),
     db: Session = Depends(get_db),
 ) -> Card:
-    """Edit fields. `completed` / `archived` take booleans; `description` / `due_at` can be cleared with null."""
-    return card_service.update_card(db, access.card, request.model_dump(exclude_unset=True))
+    """Edit fields. `completed` / `archived` take booleans; `description` / `due_at` can be cleared with null.
+
+    Send the `version` you loaded to get a 409 instead of overwriting a change made since.
+    """
+    try:
+        return card_service.update_card(db, access.card, request.model_dump(exclude_unset=True))
+    except card_service.VersionConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(e), "current_version": e.current_version},
+        )
 
 
 @router.post("/{card_id}/move", response_model=CardSchema)

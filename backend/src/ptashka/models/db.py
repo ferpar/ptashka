@@ -11,7 +11,20 @@ from enum import Enum as PyEnum
 
 from typing import Any
 
-from sqlalchemy import DateTime, Dialect, Enum, Float, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    DateTime,
+    Dialect,
+    Enum,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -159,12 +172,29 @@ class BoardList(Base):
     """A column on a board ("To do", "Doing", ...). Named BoardList so it doesn't shadow Python's `list`."""
 
     __tablename__ = "lists"
+    __table_args__ = (
+        # (id, board_id) is trivially unique since id alone is, but a foreign key can only point at
+        # columns with a unique constraint: this is what cards' composite foreign key references.
+        UniqueConstraint("id", "board_id", name="uq_lists_id_board"),
+        # A *partial* unique index: uniqueness only among rows where is_done is true,
+        # so each board has at most one done list (and any number of ordinary ones).
+        Index(
+            "uq_lists_one_done_per_board",
+            "board_id",
+            unique=True,
+            postgresql_where=text("is_done"),
+            sqlite_where=text("is_done"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     # Sort key, see services/ordering.py. Gaps are intentional.
     position: Mapped[float] = mapped_column(Float)
+    # Moving a card into the done list completes it; moving it out reopens it.
+    # server_default fills existing rows when the migration adds the column.
+    is_done: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
@@ -180,15 +210,32 @@ class Card(Base):
     """A task. Lives in one list; moves between lists of the same board."""
 
     __tablename__ = "cards"
-    # The board view reads "cards of list X in order": one index serves both the filter and the sort.
-    __table_args__ = (Index("ix_cards_list_position", "list_id", "position"),)
-
+    __table_args__ = (
+        # The board view reads "cards of list X in order": one index serves both the filter and the sort.
+        Index("ix_cards_list_position", "list_id", "position"),
+        # The database guarantees the denormalized board_id matches the list's board: a card
+        # pointing at (list 3, board 2) is rejected unless list 3 really is on board 2.
+        # ON UPDATE CASCADE: if a list ever moves to another board, its cards' board_id follows.
+        ForeignKeyConstraint(
+            ["list_id", "board_id"],
+            ["lists.id", "lists.board_id"],
+            name="fk_cards_list_board",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
-    list_id: Mapped[int] = mapped_column(ForeignKey("lists.id", ondelete="CASCADE"))
+    list_id: Mapped[int]
     # Denormalized: derivable via list_id → lists.board_id, but stored so permission checks and
-    # cross-board queries ("my cards everywhere", phase 5) don't need a join. card_service keeps it
-    # consistent: cards never move to a list on another board.
+    # cross-board queries ("my cards everywhere", phase 5) don't need a join. Kept honest by
+    # fk_cards_list_board above.
     board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"), index=True)
+
+    # Optimistic locking: SQLAlchemy sets version=1 on INSERT, bumps it on every UPDATE and adds
+    # `WHERE version = <the value it loaded>`. If another transaction got there first, no row
+    # matches and the flush raises StaleDataError instead of silently overwriting.
+    version: Mapped[int] = mapped_column(server_default="1")
+    __mapper_args__ = {"version_id_col": version}
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)  # Markdown.
     position: Mapped[float] = mapped_column(Float)

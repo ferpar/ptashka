@@ -141,6 +141,7 @@ class ListSchema(BaseModel):
     board_id: int
     name: str
     position: float
+    is_done: bool
     archived_at: datetime | None
 
 
@@ -158,6 +159,8 @@ class CardSchema(BaseModel):
     id: int
     board_id: int
     list_id: int
+    # Increases on every change. Send it back with PATCH to avoid overwriting someone else's edit.
+    version: int
     title: str
     description: str | None
     position: float
@@ -200,6 +203,8 @@ class ListCreateRequest(BaseModel):
 class ListUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     archived: bool | None = None
+    # true makes this the board's done list (unsetting the previous one).
+    is_done: bool | None = None
 
 
 class MoveRequest(BaseModel):
@@ -227,6 +232,9 @@ class CardUpdateRequest(BaseModel):
     due_at: AwareDatetime | None = None  # null clears
     completed: bool | None = None
     archived: bool | None = None
+    # Optional optimistic lock: "my edits are based on this version". If the card has changed
+    # since, the update is refused with 409 instead of silently overwriting the other change.
+    version: int | None = None
 
 
 class CardMoveRequest(MoveRequest):

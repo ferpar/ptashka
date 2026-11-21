@@ -6,10 +6,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, User, UserStatus
-from ptashka.services import ordering
+from ptashka.services import locks, ordering
 from ptashka.services.auth_service import normalize_email
 
 DEFAULT_LISTS = ("To do", "Doing", "Done")
+DONE_LIST = "Done"
 
 
 class UserNotFoundError(Exception):
@@ -68,7 +69,7 @@ def create_board(db: Session, creator: User, name: str, description: str | None,
     board.members.append(BoardMember(user_id=creator.id, role=BoardRole.OWNER))
     if default_lists:
         for name, position in zip(DEFAULT_LISTS, ordering.spread(len(DEFAULT_LISTS))):
-            board.lists.append(BoardList(name=name, position=position))
+            board.lists.append(BoardList(name=name, position=position, is_done=name == DONE_LIST))
     db.add(board)
     db.commit()
     db.refresh(board)
@@ -85,6 +86,25 @@ def toggled_timestamp(current: datetime | None, on: bool) -> datetime | None:
 
 def set_archived(item: Board | BoardList, archived: bool) -> None:
     item.archived_at = toggled_timestamp(item.archived_at, archived)
+
+
+def set_done_list(db: Session, board_list: BoardList, is_done: bool) -> None:
+    """Make `board_list` the board's done list (replacing any other), or a regular list again.
+
+    Only affects future moves: cards already in the list keep their completion state.
+    """
+    if is_done:
+        locks.lock(db, Board, board_list.board_id)  # Two requests picking different done lists take turns.
+        for other in db.scalars(
+            select(BoardList).where(
+                BoardList.board_id == board_list.board_id, BoardList.is_done, BoardList.id != board_list.id
+            )
+        ):
+            other.is_done = False
+        # Send the "unset" UPDATEs before the "set" one: otherwise the partial unique index could
+        # briefly see two done lists on the board and reject the change.
+        db.flush()
+    board_list.is_done = is_done
 
 
 # ── Members ──
@@ -141,6 +161,7 @@ def _ordered_lists(db: Session, board_id: int, exclude_id: int | None = None) ->
 
 def create_list(db: Session, board: Board, name: str) -> BoardList:
     """New lists go at the end of the board."""
+    locks.lock(db, Board, board.id)
     siblings = _ordered_lists(db, board.id)
     board_list = BoardList(board_id=board.id, name=name.strip(), position=ordering.place(siblings, len(siblings)))
     db.add(board_list)
@@ -153,6 +174,7 @@ def move_list(db: Session, board_list: BoardList, after_id: int | None) -> Board
     """Put `board_list` right after list `after_id` (None = first)."""
     if after_id == board_list.id:
         raise InvalidMoveError("A list can't be placed after itself")
+    locks.lock(db, Board, board_list.board_id)
     siblings = _ordered_lists(db, board_list.board_id, exclude_id=board_list.id)
     try:
         index = ordering.index_after([s.id for s in siblings], after_id)

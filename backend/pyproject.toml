@@ -31,6 +31,7 @@ packages = ["src/ptashka"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["postgres: needs a real Postgres database (set TEST_POSTGRES_URL)"]
 
 [tool.pyright]
 venvPath = "."
