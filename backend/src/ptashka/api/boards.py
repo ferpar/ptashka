@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from ptashka.auth import policy
 from ptashka.auth.board_access import BoardAccess, board_access, check_fields
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import DbSession
@@ -109,7 +110,7 @@ def update_board(
 ) -> BoardDetail:
     """Rename or describe the board (editors). Archiving/restoring (`archived`) needs an owner."""
     changes = request.model_dump(exclude_unset=True)
-    check_fields(access.role, changes, allowed={"name", "description"}, above=BoardRole.OWNER)
+    check_fields(access.role, changes, policy.BOARD_FIELDS)
     board_service.update_board(db, access.user, access.board, changes)
     return _detail(db, access, include_archived=False)
 
@@ -177,7 +178,7 @@ def remove_member(
     access: BoardAccess = Depends(board_access(BoardRole.VIEWER)),
 ) -> Response:
     """Owners can remove anyone; any member can remove themselves (leave the board)."""
-    if user_id != access.user.id and not access.role.includes(BoardRole.OWNER):
+    if not policy.can_remove_member(access.role, access.user.id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requires owner access")
     member = _get_member(db, access.board.id, user_id)
     try:

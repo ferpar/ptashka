@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import ColumnElement, func, select
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from ptashka.models.db import ActivityKind, BoardList, BoardMember, Card, CardAssignee, ChecklistItem, Comment, User
-from ptashka.services import activity_service, locks, ordering
+from ptashka.services import activity_service, card_rules, locks, ordering
 from ptashka.services.board_service import InvalidMoveError, toggled_timestamp
 
 
@@ -149,9 +149,14 @@ def move_card(db: Session, actor: User, card: Card, list_id: int, after_id: int 
             db, actor, ActivityKind.CARD_MOVED, card.board_id, card,
             from_list_id=source.id, from_list=source.name, to_list_id=target.id, to_list=target.name,
         )
-        if target.is_done or source.is_done:
-            card.completed_at = toggled_timestamp(card.completed_at, target.is_done)
-            _record_flag(db, actor, card, was_completed, target.is_done, ActivityKind.CARD_COMPLETED, ActivityKind.CARD_REOPENED)
+    card.completed_at = card_rules.completion_after_move(
+        card.completed_at,
+        from_done=source.is_done,
+        to_done=target.is_done,
+        same_list=target.id == source.id,
+        now=datetime.now(timezone.utc),
+    )
+    _record_flag(db, actor, card, was_completed, card.completed_at is not None, ActivityKind.CARD_COMPLETED, ActivityKind.CARD_REOPENED)
     # Assigning the relationship (not just list_id) lets SQLAlchemy copy *both* columns of the
     # composite key from the target list and keep source.cards / target.cards in sync in memory.
     card.board_list = target

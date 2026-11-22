@@ -5,6 +5,7 @@ from pydantic import AwareDatetime
 
 from ptashka.api.activity import Limit, page
 from ptashka.api.presenters import card_detail, search_hits
+from ptashka.auth import policy
 from ptashka.auth.board_access import CardAccess, card_access, check_fields
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import DbSession
@@ -83,15 +84,16 @@ def get_card(db: DbSession, access: CardAccess = Depends(card_access(BoardRole.V
 def update_card(
     db: DbSession,
     request: CardUpdateRequest,
-    access: CardAccess = Depends(card_access(BoardRole.CONTRIBUTOR)),
+    access: CardAccess = Depends(card_access(policy.lowest(policy.CARD_FIELDS))),
 ) -> CardDetail:
     """Edit fields. `completed` / `archived` take booleans; `description` / `due_at` can be cleared with null.
 
     Contributors may only send `completed` (and `version`); every other field requires editor.
     Send the `version` you loaded to get a 409 instead of overwriting a change made since.
     """
+    # (Docstrings are public API docs, published at /docs; the rules themselves live in policy.CARD_FIELDS.)
     changes = request.model_dump(exclude_unset=True)
-    check_fields(access.access.role, changes, allowed={"completed", "version"}, above=BoardRole.EDITOR)
+    check_fields(access.access.role, changes, policy.CARD_FIELDS)
     try:
         card = card_service.update_card(db, access.access.user, access.card, changes)
     except card_service.VersionConflictError as e:
@@ -153,8 +155,7 @@ def remove_label(
 
 
 def _check_self_or_editor(access: CardAccess, user_id: int) -> None:
-    """Contributors can take a card themselves ("I'll do it"); handing out work is for editors."""
-    if user_id != access.access.user.id and not access.access.role.includes(BoardRole.EDITOR):
+    if not policy.can_assign(access.access.role, access.access.user.id, user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Contributors can only assign themselves")
 
 

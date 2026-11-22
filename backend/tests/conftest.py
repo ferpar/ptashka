@@ -14,6 +14,10 @@ rollback on error), so transactions behave as in production.
 """
 
 import os
+
+# Before any ptashka import: password hashing reads it at import time (see auth/password.py).
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
+
 from collections.abc import Callable, Generator
 
 import pytest

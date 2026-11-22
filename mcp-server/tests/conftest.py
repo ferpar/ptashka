@@ -6,6 +6,11 @@ So every test goes through the real API, permissions and database rules, not a f
 drift from them. Requires the backend installed in this environment: `uv pip install -e ../backend`.
 """
 
+import os
+
+# Before any ptashka import: cheap bcrypt for throwaway test users (see backend auth/password.py).
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
+
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
 from datetime import timedelta

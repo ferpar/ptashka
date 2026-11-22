@@ -21,6 +21,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ptashka.auth import policy
 from ptashka.auth.dependencies import get_current_user
 from ptashka.db.database import DbSession
 from ptashka.models.db import Board, BoardList, BoardMember, BoardRole, Card, ChecklistItem, Comment, Label, User
@@ -63,17 +64,16 @@ class CommentAccess:
     access: BoardAccess
 
 
-def check_fields(role: BoardRole, changes: Iterable[str], allowed: set[str], above: BoardRole) -> None:
-    """Field-level permissions for PATCH endpoints shared by several roles.
-
-    The route admits the lower role; then any field outside `allowed` requires `above`.
-    E.g. a contributor may PATCH a card's `completed`, but `title` requires editor.
-    """
-    extra = set(changes) - allowed
-    if extra and not role.includes(above):
+def check_fields(role: BoardRole, changes: Iterable[str], rules: policy.FieldRules) -> None:
+    """Field-level permissions for PATCH endpoints shared by several roles: the route admits
+    `policy.lowest(rules)`, then this refuses (403) any field the caller's role may not change.
+    The decision is `policy.missing_role`; this only turns it into HTTP."""
+    missing = policy.missing_role(role, changes, rules)
+    if missing:
+        needed, fields = missing
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Requires {above.value} access to change: {', '.join(sorted(extra))}",
+            detail=f"Requires {needed.value} access to change: {', '.join(fields)}",
         )
 
 

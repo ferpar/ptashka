@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from ptashka.auth import policy
 from ptashka.auth.board_access import ChecklistItemAccess, check_fields, checklist_item_access
 from ptashka.db.database import DbSession
 from ptashka.models.db import BoardRole
@@ -16,11 +17,11 @@ router = APIRouter(prefix="/api/checklist-items", tags=["checklist"])
 def update_item(
     db: DbSession,
     request: ChecklistItemUpdateRequest,
-    access: ChecklistItemAccess = Depends(checklist_item_access(BoardRole.CONTRIBUTOR)),
+    access: ChecklistItemAccess = Depends(checklist_item_access(policy.lowest(policy.CHECKLIST_ITEM_FIELDS))),
 ) -> ChecklistItemSchema:
     """Tick (`done: true`) / untick (`done: false`) the item (contributors), or edit its text (editors)."""
     changes = request.model_dump(exclude_unset=True)
-    check_fields(access.access.role, changes, allowed={"done"}, above=BoardRole.EDITOR)
+    check_fields(access.access.role, changes, policy.CHECKLIST_ITEM_FIELDS)
     item = checklist_service.update_item(db, access.access.user, access.item, changes)
     return ChecklistItemSchema.model_validate(item)
 

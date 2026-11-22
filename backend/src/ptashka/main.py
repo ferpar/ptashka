@@ -24,11 +24,12 @@ from ptashka.api.labels import router as labels_router
 from ptashka.api.lists import router as lists_router
 from ptashka.api.tokens import router as tokens_router
 from ptashka.auth.jwt import JWT_SECRET_KEY
+from ptashka.auth.password import BCRYPT_ROUNDS
 from ptashka.config import ENVIRONMENT, validate_settings
 from ptashka.db.database import DbSession
 
 # Refuse to start with unsafe production settings (see config.py), before serving anything.
-validate_settings(ENVIRONMENT, JWT_SECRET_KEY)
+validate_settings(ENVIRONMENT, JWT_SECRET_KEY, BCRYPT_ROUNDS)
 
 app = FastAPI(title="Ptashka API", description="Trello-like task manager", version="0.1.0")
 
