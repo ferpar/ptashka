@@ -78,7 +78,8 @@ Ports: backend 8020, Vite 3020, frontend container 3021.
   `services/` business rules as transaction scripts (no HTTP; raise plain exceptions) → `models/db.py` (SQLAlchemy 2 `Mapped`
   models) and `models/schemas.py` (Pydantic request/response models = the API contract).
 - Auth: JWT access tokens (PyJWT, 15 min) + opaque refresh tokens stored as SHA-256 hashes. Registration
-  creates `pending` users; an admin approves them via `PATCH /api/admin/users/{id}`. Only `active` users
+  creates `pending` users; an admin approves them via `PATCH /api/admin/users/{id}` (frontend: `/admin`,
+  `AdminPage` + `domain/admin/UserAdminRepository`, shown to admins only). Only `active` users
   can log in. Site roles: `user`, `admin` (`require_admin`). Board permissions are separate (BoardMember).
 - Personal API tokens (`ptk_…`, SHA-256 hash stored, shown once) go in the same Bearer header as JWTs;
   `get_auth` returns an `AuthContext(user, token)`. Scope `read` = GET/HEAD/OPTIONS only (our API never

@@ -2,6 +2,7 @@ import { HttpClient } from '../api/http'
 import { AuthService } from '../auth/AuthService'
 import { Session } from '../auth/Session'
 import { localTokenStore } from '../auth/tokenStorage'
+import { HttpUserAdminRepository } from '../domain/admin/UserAdminRepository'
 import { HttpBoardRepository } from '../domain/board/HttpBoardRepository'
 import { HttpTokenRepository } from '../domain/tokens/TokenRepository'
 import type { AppContainer } from './types'
@@ -20,5 +21,6 @@ export function createAppContainer(): AppContainer {
     auth,
     boards: new HttpBoardRepository(http),
     tokens: new HttpTokenRepository(http),
+    users: new HttpUserAdminRepository(http),
   }
 }

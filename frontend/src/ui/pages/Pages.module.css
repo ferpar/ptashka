@@ -53,3 +53,12 @@ a.boardTile:hover { box-shadow: var(--shadow-lg); }
 .table th, .table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .table th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .revoked td { opacity: 0.55; }
+
+.pendingBox { background: var(--surface); border: 2px solid var(--warning); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.pendingBox h2 { font-size: 15px; }
+.pendingRow { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--border); }
+.who { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.status { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); }
+.status.pending { color: var(--warning); }
+.status.active { color: var(--success); }
+.status.disabled { color: var(--muted); }

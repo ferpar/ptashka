@@ -24,3 +24,4 @@ export const useSession = () => useContainer().session
 export const useAuth = () => useContainer().auth
 export const useBoards = () => useContainer().boards
 export const useTokens = () => useContainer().tokens
+export const useUserAdmin = () => useContainer().users

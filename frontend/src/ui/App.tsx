@@ -3,6 +3,7 @@ import { Show, type ParentProps } from 'solid-js'
 import { useSession } from '../container/ContainerContext'
 import { BoardPage } from './board/BoardPage'
 import { Layout } from './Layout'
+import { AdminPage } from './pages/AdminPage'
 import { LoginPage, RegisterPage } from './pages/AuthPages'
 import { BoardsPage } from './pages/BoardsPage'
 import { MyTasksPage } from './pages/MyTasksPage'
@@ -20,6 +21,16 @@ function RequireAuth(props: ParentProps) {
   )
 }
 
+/** Hides admin pages from everyone else. Only a convenience: the server checks every admin request. */
+function RequireAdmin(props: ParentProps) {
+  const session = useSession()
+  return (
+    <Show when={session.user?.isAdmin} fallback={<Navigate href="/" />}>
+      {props.children}
+    </Show>
+  )
+}
+
 export function App() {
   void useSession().restore()
   return (
@@ -31,6 +42,7 @@ export function App() {
         <Route path="/boards/:id" component={BoardPage} />
         <Route path="/my-tasks" component={MyTasksPage} />
         <Route path="/tokens" component={TokensPage} />
+        <Route path="/admin" component={() => <RequireAdmin><AdminPage /></RequireAdmin>} />
       </Route>
     </Router>
   )

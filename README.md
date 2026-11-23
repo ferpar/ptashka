@@ -47,7 +47,8 @@ Its own Compose project (`ptashka-local`), separate from the development databas
 5. Create the first admin from the backend container's terminal:
    `python -m ptashka.cli.create_admin --email you@example.com`
 
-New accounts sign up as *pending* and wait for an admin's approval.
+New accounts sign up as *pending* and wait for an admin's approval: admins approve them on the **Admin** page
+(`/admin`), where they can also disable accounts and grant or remove admin.
 
 **Backups:** the data lives in the `postgres_data` volume. Dump it regularly, e.g.
 `docker compose -f docker-compose.prod.yml exec db pg_dump -U ptashka ptashka > ptashka.sql`
